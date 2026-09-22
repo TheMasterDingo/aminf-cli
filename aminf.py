@@ -400,7 +400,9 @@ class Am97:
         for i in range(n):
             x = p[xs + i * 2] | (p[xs + i * 2 + 1] << 8)
             y = p[ys + i * 2] | (p[ys + i * 2 + 1] << 8)
-            colour = "#000000"
+            # The configurator reads stage colours separately; this reply
+            # usually doesn't carry them, so don't invent one.
+            colour = None
             if coloured:
                 o = cols + i * 3
                 colour = f"#{p[o]:02X}{p[o + 1]:02X}{p[o + 2]:02X}"
@@ -1019,7 +1021,8 @@ def print_status(s):
         for st in d["stages"][:d["count"]]:
             mark = "*" if st["index"] == d["current"] else " "
             xy = str(st["x"]) if st["x"] == st["y"] else f"{st['x']}/{st['y']}"
-            print(f"  {mark} [{st['index']}] {xy:<12} {st['colour']}")
+            print(f"  {mark} [{st['index']}] {xy:<12} {st['colour'] or ''}"
+                  .rstrip())
 
 
 def build_parser():
