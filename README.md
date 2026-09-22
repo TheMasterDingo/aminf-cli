@@ -27,6 +27,8 @@ hub battery     99%
 polling rate   4000 Hz
 mouse light    on  #FF823C
 dongle light   on  solid  #FFB955  bright=4/4
+dpi            stage 0 of 1
+  * [0] 1800         #FFFFFF
 ```
 
 Written because the configurator is browser-only, which means the mouse can't
@@ -84,7 +86,7 @@ aminf mouse-light color '#FF823C' # .97 only
 aminf all off                     # dongle + mouse in one go
 
 aminf rate 4000                   # 125 250 500 1000 2000 4000 8000
-aminf dpi                         # .97 only: list stages
+aminf dpi                         # list stages
 aminf dpi select 1
 aminf dpi set 0 1600              # x = y
 aminf dpi set 0 1600 1400         # independent
@@ -109,7 +111,8 @@ Global flags: `--mouse auto|97|100`, `--device auto|dongle|usb`, `--json`,
 | mouse light on / off / toggle | ✓ | ✓ |
 | mouse light colour | ✓ | — |
 | polling rate | ✓ | ✓ |
-| DPI, LOD, sensor toggles, profile, raw | ✓ | — |
+| DPI stages (list / set / select) | ✓ | ✓ |
+| LOD, sensor toggles, profile, raw | ✓ | — |
 
 The **.100** dongle takes any colour even though the web UI only offers
 seven swatches — `aminf light color '#FFB955'` sets it exactly.
@@ -163,8 +166,10 @@ checksum = 255 - (sum of the first 7 bytes & 255)
   bytes). Option `0`–`6` picks a preset swatch; anything else uses the RGB
   bytes.
 * **Mouse settings** — polling rate, mouse light and more — live in one
-  64-byte parameter block (`211` read / `83` write). Like the configurator,
-  the script reads the whole block, changes only the byte it needs, and
+  64-byte parameter block (`211` read / `83` write). DPI has its own
+  64-byte block (`212` read / `84` write): active stage, stage count, then
+  X, Y and colour for each of 8 stages. Like the configurator,
+  the script reads the whole block, changes only the bytes it needs, and
   writes the whole block back. It refuses to write if the read failed.
 * **Over 2.4G**, commands for the mouse are relayed through the dongle with a
   short handshake: open the channel (`F6 05`), wait until the dongle's status
@@ -193,7 +198,7 @@ in the bytes distinguishing them — a "read" of an id that happens to be
 anything not on the block list, so treat it accordingly.
 
 **.100:** the opposite approach — an allow-list. `M100_ALLOWED` holds the only
-twelve commands the script will ever send. Reset, clear-Bluetooth and every
+fourteen commands the script will ever send. Reset, clear-Bluetooth and every
 boot / firmware-update command are simply not in it, and devices in
 firmware-update mode are ignored. There's no `raw` for the .100.
 
@@ -211,9 +216,9 @@ Both protocols were read out of the configurator's JS bundle.
 sleep timers, rotation, key remapping — are transcribed from the bundle and
 encoded correctly as far as the source shows, but haven't been exercised.
 
-**.100** — everything this script does on the .100 has been run on real
-hardware over the 2.4G dongle: status, dongle light on/off and colour, mouse
-light on/off, polling rate.
+**.100** — run on real hardware over the 2.4G dongle: status, dongle light
+on/off and colour, mouse light on/off, polling rate. DPI (list / set /
+select) is transcribed from the bundle but hasn't been exercised yet.
 
 Both mice have only been tested with the dongle connected. The USB-direct
 paths are implemented (`--device usb`) but unconfirmed. Reports welcome.
