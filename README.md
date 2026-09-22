@@ -18,7 +18,7 @@ sensor         motion-sync=True  angle-snap=False  ripple=False
 mouse light    on  solid  #FF823C
 dongle light   on  solid  #FF4C00 sat=75 bright=120 speed=12
 dpi            stage 0 of 1
-  * [0] 1800         #FFFFFF
+  * [0] 1800
 --- .100
 model          .100
 connection     dongle
