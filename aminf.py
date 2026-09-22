@@ -17,7 +17,7 @@ speak completely different protocols; the script picks the right one.
     aminf mouse-light off
     aminf all off                     # dongle + mouse
     aminf rate 4000
-    aminf dpi set 0 1600              # .97 only
+    aminf dpi set 0 1600
 
 MIT licensed. Not affiliated with or endorsed by Angry Miao. Use at your own
 risk -- see the safety notes in the README.
@@ -503,6 +503,8 @@ M100_REPORT_IDS = (0, 4, 5, 6, 7, 20, 21, 22, 23)
 
 M100_GET_PARAMS = 211          # 64-byte parameter block (rate, mouse light ...)
 M100_SET_PARAMS = 83           # the same block written back
+M100_GET_DPI = 212             # 64-byte DPI block
+M100_SET_DPI = 84              # the same block written back
 M100_GET_BATTERY = 214
 M100_GET_PROFILE = 133
 M100_GET_DONGLE_SWITCH = 135   # dongle light on/off
@@ -518,7 +520,8 @@ M100_FWD_FETCH = 252
 # Reset (2), clear-bluetooth (97) and every boot/firmware command are simply
 # not in the list.
 M100_ALLOWED = {
-    M100_GET_PARAMS, M100_SET_PARAMS, M100_GET_BATTERY, M100_GET_PROFILE,
+    M100_GET_PARAMS, M100_SET_PARAMS, M100_GET_DPI, M100_SET_DPI,
+    M100_GET_BATTERY, M100_GET_PROFILE,
     M100_GET_DONGLE_SWITCH, M100_SET_DONGLE_SWITCH,
     M100_GET_DONGLE_LIGHT, M100_SET_DONGLE_LIGHT,
     M100_DONGLE_STATUS, M100_FWD_OPEN, M100_FWD_LENGTH, M100_FWD_FETCH,
@@ -539,6 +542,12 @@ M100_P_RATE = 9                # byte offsets inside the parameter block
 M100_P_MOUSE_LIGHT = 60
 M100_P_COLOUR_CHARGING = 54    # 54-56 rgb while charging
 M100_P_COLOUR_CHARGED = 57     # 57-59 rgb once charged
+
+# DPI block layout: [2] active stage, [3] stage count, then for stage i:
+# x at 8+2i, y at 24+2i (little-endian), colour at 40+3i.
+M100_D_ACTIVE, M100_D_COUNT = 2, 3
+M100_D_X, M100_D_Y, M100_D_COLOUR = 8, 24, 40
+M100_DPI_STAGES = 8
 
 
 class MouseOffline(AmError):
@@ -814,13 +823,24 @@ class Am100:
                           "written")
         return r
 
-    def _modify_params(self, changes):
-        b = list(self._read_params())
-        b[0] = M100_SET_PARAMS
+    def _write_block(self, block, set_cmd, changes):
+        b = list(block)
+        b[0] = set_cmd
         for offset, value in changes.items():
             b[offset] = value & 0xFF
         b[7] = m100_checksum(b[:7])
         self._to_mouse(b, expect=False)
+
+    def _modify_params(self, changes):
+        self._write_block(self._read_params(), M100_SET_PARAMS, changes)
+
+    def _read_dpi(self):
+        if self.dry_run:
+            raise AmError("dry run: DPI changes need a live read first")
+        r = self._to_mouse(m100_cmd(M100_GET_DPI), expect=True)
+        if not r or len(r) != M100_LEN or r[0] != M100_GET_DPI:
+            raise AmError("could not read the DPI block -- nothing written")
+        return r
 
     # -- reads -------------------------------------------------------------
 
@@ -868,6 +888,20 @@ class Am100:
             out["colour_charged"] = c2
         return out
 
+    def dpi(self):
+        try:
+            d = self._read_dpi()
+        except (MouseOffline, AmError):
+            return None
+        stages = []
+        for i in range(M100_DPI_STAGES):
+            x = d[M100_D_X + 2 * i] | (d[M100_D_X + 2 * i + 1] << 8)
+            y = d[M100_D_Y + 2 * i] | (d[M100_D_Y + 2 * i + 1] << 8)
+            stages.append({"index": i, "x": x or 800, "y": y or 800,
+                           "colour": rgb_hex(d[M100_D_COLOUR + 3 * i:])})
+        return {"count": d[M100_D_COUNT] or 1, "current": d[M100_D_ACTIVE],
+                "stages": stages}
+
     def dongle_light(self):
         if not self.dongle or self.dry_run:
             return None
@@ -914,6 +948,24 @@ class Am100:
     def set_mouse_light(self, on):
         self._modify_params({M100_P_MOUSE_LIGHT: 1 if on else 0})
 
+    def set_dpi_stage(self, index, x, y=None):
+        if not 0 <= index < M100_DPI_STAGES:
+            raise AmError(f"stage must be 0-{M100_DPI_STAGES - 1}")
+        x = clamp_dpi(x)
+        y = clamp_dpi(y) if y is not None else x
+        lo, hi = M100_D_X + 2 * index, M100_D_Y + 2 * index
+        self._write_block(self._read_dpi(), M100_SET_DPI, {
+            lo: x & 0xFF, lo + 1: x >> 8, hi: y & 0xFF, hi + 1: y >> 8})
+        return x, y
+
+    def select_dpi_stage(self, index):
+        d = self._read_dpi()
+        count = d[M100_D_COUNT] or 1
+        if not 0 <= index < count:
+            raise AmError(f"stage must be 0-{count - 1} (the mouse has "
+                          f"{count} stage{'s' if count != 1 else ''} enabled)")
+        self._write_block(d, M100_SET_DPI, {M100_D_ACTIVE: index})
+
     def set_polling_rate(self, hz):
         if hz not in M100_RATE_CODE:
             raise AmError(f"polling rate must be one of "
@@ -932,7 +984,7 @@ FLAGS = {
 
 # Commands only the .97 implements here. On a .100 they're skipped with a
 # notice instead of guessing at an untested encoding.
-ONLY_97 = {"dpi", "toggle", "lod", "profile", "raw"}
+ONLY_97 = {"toggle", "lod", "profile", "raw"}
 ONLY_97_LIGHT = {"brightness", "speed", "effect"}
 
 
@@ -951,6 +1003,7 @@ def collect_status(m):
             "polling_rate": m.polling_rate(params),
             "mouse_light": m.mouse_light(params),
             "dongle_light": m.dongle_light(),
+            "dpi": m.dpi(),
         }
     return {
         "model": m.model,
@@ -998,6 +1051,7 @@ def print_status(s):
                          f"{' (preset)' if dl['preset'] else ''}"
                          f"  bright={dl['brightness']}/4")
             print(line)
+        print_dpi(s.get("dpi"))
         return
 
     print(f"lift-off dist  {s['lod']}")
@@ -1015,14 +1069,18 @@ def print_status(s):
         print(f"dongle light   {'on' if dl['on'] else 'off'}  {name}  "
               f"{hue_to_hex(dl['hue1'])} sat={dl['sat1']} "
               f"bright={dl['brightness']} speed={dl['speed']}")
-    d = s["dpi"]
-    if d:
-        print(f"dpi            stage {d['current']} of {d['count']}")
-        for st in d["stages"][:d["count"]]:
-            mark = "*" if st["index"] == d["current"] else " "
-            xy = str(st["x"]) if st["x"] == st["y"] else f"{st['x']}/{st['y']}"
-            print(f"  {mark} [{st['index']}] {xy:<12} {st['colour'] or ''}"
-                  .rstrip())
+    print_dpi(s["dpi"])
+
+
+def print_dpi(d):
+    if not d:
+        return
+    print(f"dpi            stage {d['current']} of {d['count']}")
+    for st in d["stages"][:d["count"]]:
+        mark = "*" if st["index"] == d["current"] else " "
+        xy = str(st["x"]) if st["x"] == st["y"] else f"{st['x']}/{st['y']}"
+        print(f"  {mark} [{st['index']}] {xy:<12} {st['colour'] or ''}"
+              .rstrip())
 
 
 def build_parser():
@@ -1067,7 +1125,7 @@ def build_parser():
     p = sub.add_parser("rate", help="polling rate in Hz")
     p.add_argument("hz", type=int, choices=VALID_RATES)
 
-    p = sub.add_parser("dpi", help="DPI stages (.97)")
+    p = sub.add_parser("dpi", help="DPI stages")
     ds = p.add_subparsers(dest="action")
     q = ds.add_parser("select"); q.add_argument("index", type=int)
     q = ds.add_parser("set")
