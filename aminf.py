@@ -17,7 +17,9 @@ speak completely different protocols; the script picks the right one.
     aminf mouse-light off
     aminf all off                     # dongle + mouse
     aminf rate 4000
-    aminf dpi set 0 1600
+    aminf remap                       # what the side buttons send
+    aminf remap forward F24           # side button -> F24
+    aminf remap forward default       # back to a normal Forward button
 
 MIT licensed. Not affiliated with or endorsed by Angry Miao. Use at your own
 risk -- see the safety notes in the README.
@@ -29,7 +31,7 @@ import json
 import sys
 import time
 
-__version__ = "2.0.0"
+__version__ = "2.2.0"
 
 try:
     import hid
@@ -103,8 +105,15 @@ RGB_LED_COUNT = 1
 RGB_REALTIME_FLAG = 0x80
 
 HUE_MAX = 1530
-DPI_MIN, DPI_MAX, DPI_STEP = 50, 30000, 50
 VALID_RATES = (125, 250, 500, 1000, 2000, 4000, 8000)
+
+# Button remapping: setKeyRemap [key id][type][params...], getKeyRemap
+# [key id] -> [status][key id][type][params...]. Key ids: 1 left, 2 right,
+# 3 middle, 4 forward, 5 back. A button's own function is the type equal to
+# its key id. Type 6 is a keyboard key: [consumer lo][consumer hi][hid usage]
+# [modifiers: 1 ctrl, 2 shift, 4 alt, 8 win].
+REMAP_KEY_ID = {"forward": 4, "back": 5}
+REMAP_KEYBOARD = 6
 
 DONGLE_EFFECTS = {
     "solid": 1, "breathing": 2, "arc": 3, "mosaic": 4,
@@ -171,8 +180,39 @@ def u16le(v):
     return [v & 0xFF, (v >> 8) & 0xFF]
 
 
-def clamp_dpi(v):
-    return max(DPI_MIN, min(DPI_MAX, (int(v) // DPI_STEP) * DPI_STEP))
+# --------------------------------------------------------------- remap keys
+#
+# Keys are HID keyboard usages. The web configurator's key picker stops at
+# F12, but the .100's own code accepts any usage from 0x04 to 0xE7 and the
+# .97's passes the byte through unchecked, so F13-F24 can be set from here.
+
+FKEYS = {f"F{i}": 0x39 + i for i in range(1, 13)}             # F1 0x3A..F12 0x45
+FKEYS.update({f"F{i}": 0x5B + i for i in range(13, 25)})      # F13 0x68..F24 0x73
+KEY_NAMES = {v: k for k, v in FKEYS.items()}
+KEY_NAMES[0x47] = "ScrollLock"
+MODIFIER_NAMES = ("Ctrl", "Shift", "Alt", "Win")
+
+
+def parse_remap_key(text):
+    """'default' -> None, 'F24' -> 0x73, '0x47' -> 0x47."""
+    t = text.strip()
+    if t.lower() == "default":
+        return None
+    if t.upper() in FKEYS:
+        return FKEYS[t.upper()]
+    try:
+        v = int(t, 0)
+    except ValueError:
+        v = -1
+    if not 0x04 <= v <= 0xE7:
+        raise AmError(f"unknown key '{text}' -- use F1-F24, a HID usage "
+                      f"like 0x47, or 'default'")
+    return v
+
+
+def key_name(usage, modifiers=()):
+    return "+".join(list(modifiers) +
+                    [KEY_NAMES.get(usage, f"key 0x{usage:02X}")])
 
 
 # --------------------------------------------------------------- exceptions
@@ -387,28 +427,6 @@ class Am97:
             return None
         return f"#{d[4]:02X}{d[5]:02X}{d[6]:02X}"
 
-    def dpi(self):
-        p = self.send(CMD["getDpi"])
-        if not p or len(p) < 3 or p[0] != 0:
-            return None
-        count, current = p[1], p[2]
-        n = 8 if 0 < count <= 8 and len(p) >= 3 + count * 4 else count
-        xs, ys = 3, 3 + n * 2
-        cols = ys + n * 2
-        coloured = len(p) >= cols + n * 3
-        stages = []
-        for i in range(n):
-            x = p[xs + i * 2] | (p[xs + i * 2 + 1] << 8)
-            y = p[ys + i * 2] | (p[ys + i * 2 + 1] << 8)
-            # The configurator reads stage colours separately; this reply
-            # usually doesn't carry them, so don't invent one.
-            colour = None
-            if coloured:
-                o = cols + i * 3
-                colour = f"#{p[o]:02X}{p[o + 1]:02X}{p[o + 2]:02X}"
-            stages.append({"index": i, "x": x, "y": y, "colour": colour})
-        return {"count": count, "current": current, "stages": stages}
-
     # -- writes ------------------------------------------------------------
     #
     # Lighting has no "set just this field" command: the firmware takes the
@@ -461,15 +479,6 @@ class Am97:
             raise AmError(f"polling rate must be one of {VALID_RATES}")
         self.send(CMD["setReportRate"], u16le(hz))
 
-    def set_dpi_stage(self, index, x, y=None):
-        x = clamp_dpi(x)
-        y = clamp_dpi(y) if y is not None else x
-        self.send(CMD["setDpi"], [index] + u16le(x) + u16le(y))
-        return x, y
-
-    def select_dpi_stage(self, index):
-        self.send(CMD["setCurrentDpiStage"], [index])
-
     def set_profile(self, index):
         self.send(CMD["changeProfile"], [index])
 
@@ -478,6 +487,53 @@ class Am97:
 
     def set_lod(self, value):
         self.send(CMD["setLod"], [max(0, min(2, value))])
+
+    # -- button remapping --------------------------------------------------
+
+    def key_remap(self, button):
+        """(type, params) for a side button, or None."""
+        key_id = REMAP_KEY_ID[button]
+        p = self.send(CMD["getKeyRemap"], [key_id])
+        if not p or len(p) < 3 or p[0] != 0 or p[1] != key_id:
+            return None
+        return p[2], list(p[3:])
+
+    def remap_label(self, button):
+        if self.dry_run:
+            return "unknown (dry run)"
+        got = self.key_remap(button)
+        if not got:
+            return "no reply"
+        kind, params = got
+        if kind == REMAP_KEY_ID[button]:
+            return f"{button} (default)"
+        if kind == REMAP_KEYBOARD and len(params) >= 4:
+            consumer = params[0] | (params[1] << 8)
+            if consumer:
+                return f"media key 0x{consumer:04X}"
+            mods = [n for i, n in enumerate(MODIFIER_NAMES)
+                    if params[3] & (1 << i)]
+            return key_name(params[2], mods)
+        other = {0: "disabled", 1: "left click", 2: "right click",
+                 3: "middle click", 4: "forward", 5: "back"}
+        return other.get(kind, f"function type {kind}")
+
+    def set_key_remap(self, button, usage):
+        """usage None gives the button its own function back."""
+        key_id = REMAP_KEY_ID[button]
+        data = ([key_id, key_id] if usage is None
+                else [key_id, REMAP_KEYBOARD, 0, 0, usage, 0])
+        self.send(CMD["setKeyRemap"], data)
+        if self.dry_run:
+            return
+        want = data[2:]
+        for wait in (0.1, 0.3, 0.6):
+            time.sleep(wait)
+            got = self.key_remap(button)
+            if got and got[0] == data[1] and \
+                    (got[1] + [0] * len(want))[:len(want)] == want:
+                return
+        raise AmError(f"{button}: the mouse didn't confirm the new mapping")
 
 
 
@@ -503,8 +559,6 @@ M100_REPORT_IDS = (0, 4, 5, 6, 7, 20, 21, 22, 23)
 
 M100_GET_PARAMS = 211          # 64-byte parameter block (rate, mouse light ...)
 M100_SET_PARAMS = 83           # the same block written back
-M100_GET_DPI = 212             # 64-byte DPI block
-M100_SET_DPI = 84              # the same block written back
 M100_GET_BATTERY = 214
 M100_GET_PROFILE = 133
 M100_GET_DONGLE_SWITCH = 135   # dongle light on/off
@@ -515,17 +569,27 @@ M100_DONGLE_STATUS = 247
 M100_FWD_OPEN = 246
 M100_FWD_LENGTH = 254
 M100_FWD_FETCH = 252
+M100_GET_KEYMAP = 208          # [208][profile][0] -> 64-byte key map, no echo
+M100_SET_KEY = 80              # [80][profile][button][0 0 0 0][sum][4 bytes]
 
 # The only first bytes this script will ever put on the wire for the .100.
-# Reset (2), clear-bluetooth (97) and every boot/firmware command are simply
-# not in the list.
+# Reset (2), clear-bluetooth (97), the DPI block (212/84) and every
+# boot/firmware command are simply not in the list.
 M100_ALLOWED = {
-    M100_GET_PARAMS, M100_SET_PARAMS, M100_GET_DPI, M100_SET_DPI,
+    M100_GET_PARAMS, M100_SET_PARAMS,
     M100_GET_BATTERY, M100_GET_PROFILE,
     M100_GET_DONGLE_SWITCH, M100_SET_DONGLE_SWITCH,
     M100_GET_DONGLE_LIGHT, M100_SET_DONGLE_LIGHT,
     M100_DONGLE_STATUS, M100_FWD_OPEN, M100_FWD_LENGTH, M100_FWD_FETCH,
+    M100_GET_KEYMAP, M100_SET_KEY,
 }
+
+# Button remapping. Each button is 4 bytes in the key map: its own mouse
+# function is [1, 0, code, 0]; a keyboard key is [0, usage, 0, 0], or
+# [0, mod, mod, usage] with modifiers (0xE0-0xE3 = Ctrl/Shift/Alt/Win).
+M100_KEY_INDEX = {"forward": 3, "back": 4}
+M100_KEY_OFFSET = {3: 12, 4: 16}
+M100_KEY_DEFAULT = {3: [1, 0, 244, 0], 4: [1, 0, 243, 0]}
 
 M100_RATE_CODE = {125: 8, 250: 4, 500: 2, 1000: 1, 2000: 132, 4000: 130,
                   8000: 129}
@@ -543,11 +607,10 @@ M100_P_MOUSE_LIGHT = 60
 M100_P_COLOUR_CHARGING = 54    # 54-56 rgb while charging
 M100_P_COLOUR_CHARGED = 57     # 57-59 rgb once charged
 
-# DPI block layout: [2] active stage, [3] stage count, then for stage i:
-# x at 8+2i, y at 24+2i (little-endian), colour at 40+3i.
-M100_D_ACTIVE, M100_D_COUNT = 2, 3
-M100_D_X, M100_D_Y, M100_D_COLOUR = 8, 24, 40
-M100_DPI_STAGES = 8
+# Key map entry types the mouse can report (keyboard, mouse function,
+# media, macro, turbo click, DPI step). Used to tell a real key map apart
+# from a stale reply, which always starts with a command byte.
+M100_KEY_TYPES = {0, 1, 3, 9, 11, 20}
 
 
 class MouseOffline(AmError):
@@ -578,7 +641,11 @@ def m100_raw(*b):
 M100_STATUS_PKT = m100_raw(M100_DONGLE_STATUS)
 
 
-def m100_hex(pkt, n=8):
+def m100_hex(pkt, n=None):
+    """Hex dump; by default through the last non-zero byte, at least 8."""
+    if n is None:
+        last = max((i for i, x in enumerate(pkt) if x), default=0)
+        n = max(8, last + 1)
     return " ".join(f"{x:02x}" for x in pkt[:n])
 
 
@@ -589,10 +656,11 @@ def rgb_hex(b):
 class Am100Link:
     """One open .100 interface (the dongle, or the mouse over USB)."""
 
-    def __init__(self, is_dongle, report_id, dev):
+    def __init__(self, is_dongle, report_id, dev, path=None):
         self.is_dongle = is_dongle
         self.rid = report_id
         self.dev = dev
+        self.path = path
 
     def close(self):
         try:
@@ -600,7 +668,21 @@ class Am100Link:
         except Exception:
             pass
 
-    def _write(self, pkt, attempts=3):
+    def _reopen(self):
+        """Close and reopen the interface -- what the configurator does
+        between failed write attempts."""
+        if not self.path:
+            return
+        self.close()
+        time.sleep(0.05)
+        try:
+            dev = hid.device()
+            dev.open_path(self.path)
+            self.dev = dev
+        except Exception:
+            pass                      # the next attempt will report it
+
+    def _write(self, pkt, attempts=5):
         if pkt[0] not in M100_ALLOWED:
             raise AmError(f"refusing .100 command {pkt[0]:#04x}")
         last = None
@@ -613,6 +695,7 @@ class Am100Link:
             except (OSError, ValueError) as exc:
                 last = exc
                 if attempt < attempts:
+                    self._reopen()
                     time.sleep(0.15 * attempt)
         raise AmError(f"HID write failed: {last}")
 
@@ -622,7 +705,7 @@ class Am100Link:
             r = r[1:]
         return m100_pad(r[:M100_LEN])
 
-    def send(self, pkt, expect=False, delay=0.03, attempts=3):
+    def send(self, pkt, expect=False, delay=0.03, attempts=5):
         self._write(pkt, attempts)
         if not expect:
             time.sleep(0.005)
@@ -701,6 +784,7 @@ class Am100:
         self.dongle = dongle
         self.mouse = mouse
         self.dry_run = dry_run
+        self.offline = False      # set once the dongle reports the mouse away
 
     @property
     def has_dongle(self):
@@ -738,7 +822,7 @@ class Am100:
         except Exception:
             return None
         for rid in M100_REPORT_IDS:
-            link = Am100Link(is_dongle, rid, dev)
+            link = Am100Link(is_dongle, rid, dev, path)
             try:
                 if is_dongle:
                     ok = bool(link.send(M100_STATUS_PKT, expect=True,
@@ -799,7 +883,15 @@ class Am100:
             return None
         if self.mouse:
             return self.mouse.send(pkt, expect=expect)
-        return self.dongle.forward(pkt, expect)
+        # Once the dongle has said the mouse is away, don't repeat the whole
+        # relay handshake for every remaining read in the same run.
+        if self.offline:
+            raise MouseOffline("mouse is off or out of range")
+        try:
+            return self.dongle.forward(pkt, expect)
+        except MouseOffline:
+            self.offline = True
+            raise
 
     def _to_dongle(self, pkt, expect):
         if self.dry_run:
@@ -816,31 +908,26 @@ class Am100:
 
     def _read_params(self):
         if self.dry_run:
-            raise AmError("dry run: parameter changes need a live read first")
+            raise AmError("dry run: no device to read from")
         r = self._to_mouse(m100_cmd(M100_GET_PARAMS), expect=True)
         if not r or len(r) != M100_LEN or r[0] != M100_GET_PARAMS:
             raise AmError("could not read the parameter block -- nothing "
                           "written")
         return r
 
-    def _write_block(self, block, set_cmd, changes):
-        b = list(block)
-        b[0] = set_cmd
+    def _modify_params(self, changes):
+        if self.dry_run:
+            what = ", ".join(f"byte {o} = {v & 0xFF:#04x}"
+                             for o, v in changes.items())
+            print(f"  would read the parameter block from the mouse and "
+                  f"write it back with {what}")
+            return
+        b = list(self._read_params())
+        b[0] = M100_SET_PARAMS
         for offset, value in changes.items():
             b[offset] = value & 0xFF
         b[7] = m100_checksum(b[:7])
         self._to_mouse(b, expect=False)
-
-    def _modify_params(self, changes):
-        self._write_block(self._read_params(), M100_SET_PARAMS, changes)
-
-    def _read_dpi(self):
-        if self.dry_run:
-            raise AmError("dry run: DPI changes need a live read first")
-        r = self._to_mouse(m100_cmd(M100_GET_DPI), expect=True)
-        if not r or len(r) != M100_LEN or r[0] != M100_GET_DPI:
-            raise AmError("could not read the DPI block -- nothing written")
-        return r
 
     # -- reads -------------------------------------------------------------
 
@@ -849,7 +936,7 @@ class Am100:
             return None
         try:
             b = self._to_mouse(m100_cmd(M100_GET_BATTERY), expect=True)
-        except MouseOffline:
+        except AmError:
             return None
         if not b or b[0] != M100_GET_BATTERY or not b[2] or b[3] > 100:
             return None
@@ -870,7 +957,15 @@ class Am100:
     def _params_or_none(self):
         try:
             return self._read_params()
-        except (MouseOffline, AmError):
+        except AmError:
+            return None
+
+    def profile(self):
+        if self.dry_run:
+            return None
+        try:
+            return self._profile()
+        except AmError:
             return None
 
     def polling_rate(self, params=None):
@@ -887,20 +982,6 @@ class Am100:
         if c2 != c1:
             out["colour_charged"] = c2
         return out
-
-    def dpi(self):
-        try:
-            d = self._read_dpi()
-        except (MouseOffline, AmError):
-            return None
-        stages = []
-        for i in range(M100_DPI_STAGES):
-            x = d[M100_D_X + 2 * i] | (d[M100_D_X + 2 * i + 1] << 8)
-            y = d[M100_D_Y + 2 * i] | (d[M100_D_Y + 2 * i + 1] << 8)
-            stages.append({"index": i, "x": x or 800, "y": y or 800,
-                           "colour": rgb_hex(d[M100_D_COLOUR + 3 * i:])})
-        return {"count": d[M100_D_COUNT] or 1, "current": d[M100_D_ACTIVE],
-                "stages": stages}
 
     def dongle_light(self):
         if not self.dongle or self.dry_run:
@@ -948,29 +1029,75 @@ class Am100:
     def set_mouse_light(self, on):
         self._modify_params({M100_P_MOUSE_LIGHT: 1 if on else 0})
 
-    def set_dpi_stage(self, index, x, y=None):
-        if not 0 <= index < M100_DPI_STAGES:
-            raise AmError(f"stage must be 0-{M100_DPI_STAGES - 1}")
-        x = clamp_dpi(x)
-        y = clamp_dpi(y) if y is not None else x
-        lo, hi = M100_D_X + 2 * index, M100_D_Y + 2 * index
-        self._write_block(self._read_dpi(), M100_SET_DPI, {
-            lo: x & 0xFF, lo + 1: x >> 8, hi: y & 0xFF, hi + 1: y >> 8})
-        return x, y
-
-    def select_dpi_stage(self, index):
-        d = self._read_dpi()
-        count = d[M100_D_COUNT] or 1
-        if not 0 <= index < count:
-            raise AmError(f"stage must be 0-{count - 1} (the mouse has "
-                          f"{count} stage{'s' if count != 1 else ''} enabled)")
-        self._write_block(d, M100_SET_DPI, {M100_D_ACTIVE: index})
-
     def set_polling_rate(self, hz):
         if hz not in M100_RATE_CODE:
             raise AmError(f"polling rate must be one of "
                           f"{tuple(M100_RATE_CODE)}")
         self._modify_params({M100_P_RATE: M100_RATE_CODE[hz]})
+
+    # -- button remapping (per profile, like the configurator) -------------
+
+    def _profile(self):
+        r = self._to_mouse(m100_cmd(M100_GET_PROFILE), expect=True)
+        if not r or r[0] != M100_GET_PROFILE or r[1] > 7:
+            raise AmError("could not read the active profile -- nothing "
+                          "written")
+        return r[1]
+
+    def _keymap(self, profile):
+        # The key map comes back without an echo of the command byte (the
+        # configurator skips its echo check here too), so the one way to
+        # catch a reply left over from an earlier command is that byte 0 of
+        # a real key map is a key type, never a command byte.
+        for _ in range(2):
+            r = self._to_mouse(m100_cmd(M100_GET_KEYMAP, [profile, 0]),
+                               expect=True)
+            if r and len(r) == M100_LEN and r[0] in M100_KEY_TYPES:
+                return r
+            time.sleep(0.05)
+        raise AmError("could not read the key map")
+
+    def key_remap(self, button):
+        o = M100_KEY_OFFSET[M100_KEY_INDEX[button]]
+        return list(self._keymap(self._profile())[o:o + 4])
+
+    def remap_label(self, button):
+        if self.dry_run:
+            return "unknown (dry run)"
+        m = self.key_remap(button)
+        for name, idx in M100_KEY_INDEX.items():
+            if m == M100_KEY_DEFAULT[idx]:
+                return f"{name} (default)" if name == button else name
+        if m == [0, 0, 0, 0]:
+            return "disabled"
+        if m[0] == 0 and 4 <= m[1] <= 0xE7 and m[2] == 0 and m[3] == 0:
+            return key_name(m[1])
+        if m[0] == 0 and 4 <= m[3] <= 0xE7:
+            mods = [MODIFIER_NAMES[x - 0xE0] for x in m[1:3]
+                    if 0xE0 <= x <= 0xE3]
+            return key_name(m[3], mods)
+        return "bytes " + " ".join(f"{x:02x}" for x in m)
+
+    def set_key_remap(self, button, usage):
+        """usage None gives the button its own function back."""
+        idx = M100_KEY_INDEX[button]
+        mapping = (list(M100_KEY_DEFAULT[idx]) if usage is None
+                   else [0, usage, 0, 0])
+        profile = 0 if self.dry_run else self._profile()
+        head = [M100_SET_KEY, profile, idx, 0, 0, 0, 0]
+        pkt = m100_pad(head + [m100_checksum(head)] + mapping)
+        o = M100_KEY_OFFSET[idx]
+        # Write and read back. If the mouse hasn't taken it, write once more
+        # and wait longer -- the configurator's own retry schedule.
+        for waits in ((0.25, 0.4, 0.6), (0.5, 0.7)):
+            self._to_mouse(pkt, expect=False)
+            if self.dry_run:
+                return
+            for wait in waits:
+                time.sleep(wait)
+                if list(self._keymap(profile)[o:o + 4]) == mapping:
+                    return
+        raise AmError(f"{button}: the mouse didn't confirm the new mapping")
 
 
 # --------------------------------------------------------------------- CLI
@@ -1000,10 +1127,11 @@ def collect_status(m):
             "connection": "dongle" if m.dongle else "usb",
             "battery": m.battery(),
             "hub_battery": m.hub_battery(),
-            "polling_rate": m.polling_rate(params),
-            "mouse_light": m.mouse_light(params),
+            "profile": m.profile(),
+            "polling_rate": m.polling_rate(params) if params else None,
+            "mouse_light": m.mouse_light(params) if params else None,
             "dongle_light": m.dongle_light(),
-            "dpi": m.dpi(),
+            "mouse_offline": m.offline,
         }
     return {
         "model": m.model,
@@ -1019,7 +1147,6 @@ def collect_status(m):
         "mouse_light": m.mouse_light(),
         "mouse_colour": m.mouse_colour(),
         "dongle_light": m.dongle_light(),
-        "dpi": m.dpi(),
     }
 
 
@@ -1032,11 +1159,14 @@ def print_status(s):
         if b:
             print(f"{label}  {b['percent']:3d}%"
                   f"{'  charging' if b.get('charging') else ''}")
-    if "profile" in s:
+    if s.get("profile") is not None:
         print(f"profile        {s['profile']}")
-    print(f"polling rate   {s['polling_rate']} Hz")
+    rate = s["polling_rate"]
+    print(f"polling rate   {f'{rate} Hz' if rate else '--'}")
 
     if s["model"] == ".100":
+        if s.get("mouse_offline"):
+            print("mouse          off or out of range (dongle values only)")
         ml = s["mouse_light"]
         if ml:
             extra = (f" / charged {ml['colour_charged']}"
@@ -1051,7 +1181,6 @@ def print_status(s):
                          f"{' (preset)' if dl['preset'] else ''}"
                          f"  bright={dl['brightness']}/4")
             print(line)
-        print_dpi(s.get("dpi"))
         return
 
     print(f"lift-off dist  {s['lod']}")
@@ -1069,18 +1198,6 @@ def print_status(s):
         print(f"dongle light   {'on' if dl['on'] else 'off'}  {name}  "
               f"{hue_to_hex(dl['hue1'])} sat={dl['sat1']} "
               f"bright={dl['brightness']} speed={dl['speed']}")
-    print_dpi(s["dpi"])
-
-
-def print_dpi(d):
-    if not d:
-        return
-    print(f"dpi            stage {d['current']} of {d['count']}")
-    for st in d["stages"][:d["count"]]:
-        mark = "*" if st["index"] == d["current"] else " "
-        xy = str(st["x"]) if st["x"] == st["y"] else f"{st['x']}/{st['y']}"
-        print(f"  {mark} [{st['index']}] {xy:<12} {st['colour'] or ''}"
-              .rstrip())
 
 
 def build_parser():
@@ -1125,14 +1242,6 @@ def build_parser():
     p = sub.add_parser("rate", help="polling rate in Hz")
     p.add_argument("hz", type=int, choices=VALID_RATES)
 
-    p = sub.add_parser("dpi", help="DPI stages")
-    ds = p.add_subparsers(dest="action")
-    q = ds.add_parser("select"); q.add_argument("index", type=int)
-    q = ds.add_parser("set")
-    q.add_argument("index", type=int)
-    q.add_argument("x", type=int)
-    q.add_argument("y", type=int, nargs="?")
-
     p = sub.add_parser("toggle", help="sensor options (.97)")
     p.add_argument("feature", choices=sorted(FLAGS))
     p.add_argument("state", choices=["on", "off"])
@@ -1142,6 +1251,11 @@ def build_parser():
 
     p = sub.add_parser("profile", help="switch onboard profile (.97)")
     p.add_argument("index", type=int)
+
+    p = sub.add_parser("remap", help="what a side button sends")
+    p.add_argument("button", nargs="?", choices=sorted(REMAP_KEY_ID))
+    p.add_argument("key", nargs="?",
+                   help="F1-F24, a HID usage like 0x47, or 'default'")
 
     p = sub.add_parser("raw",
                        help="send one command id and print the reply (.97)")
@@ -1238,19 +1352,6 @@ def run_command(m, args, say):
         m.set_polling_rate(args.hz)
         say(f"polling rate -> {args.hz} Hz")
 
-    elif c == "dpi":
-        if args.action == "select":
-            m.select_dpi_stage(args.index)
-            say(f"dpi stage -> {args.index}")
-        elif args.action == "set":
-            x, y = m.set_dpi_stage(args.index, args.x, args.y)
-            say(f"dpi stage {args.index} -> {x}/{y}")
-        else:
-            d = m.dpi()
-            if not d:
-                raise AmError("no reply")
-            print(json.dumps(d, indent=2))
-
     elif c == "toggle":
         m.set_flag(FLAGS[args.feature], args.state == "on")
         say(f"{args.feature} -> {args.state}")
@@ -1262,6 +1363,22 @@ def run_command(m, args, say):
     elif c == "profile":
         m.set_profile(args.index)
         say(f"profile -> {args.index}")
+
+    elif c == "remap":
+        if args.button and args.key:
+            usage = parse_remap_key(args.key)
+            m.set_key_remap(args.button, usage)
+            say(f"{args.button} -> "
+                f"{'default' if usage is None else key_name(usage)}")
+        else:
+            buttons = [args.button] if args.button else sorted(REMAP_KEY_ID,
+                                                               reverse=True)
+            labels = {b: m.remap_label(b) for b in buttons}
+            if args.json:
+                print(json.dumps(dict(labels, model=m.model), indent=2))
+            else:
+                for b, label in labels.items():
+                    print(f"{b:<8} {label}")
 
     elif c == "raw":
         v = m.send(int(args.cmd_id, 0), device_id=int(args.to, 0))
