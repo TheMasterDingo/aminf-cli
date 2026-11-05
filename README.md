@@ -6,7 +6,16 @@ uses. No driver, no browser.
 
 ```
 $ aminf status
---- .97
+model          .100
+connection     dongle
+battery        100%
+hub battery     62%
+profile        0
+polling rate   4000 Hz
+mouse light    on  #FF823C
+dongle light   on  solid  #FFB955  bright=4/4
+
+$ aminf status            # with the .97 plugged in instead
 model          .97
 connection     dongle
 battery         94%
@@ -17,23 +26,12 @@ lift-off dist  0
 sensor         motion-sync=True  angle-snap=False  ripple=False
 mouse light    on  solid  #FF823C
 dongle light   on  solid  #FF4C00 sat=75 bright=120 speed=12
-dpi            stage 0 of 1
-  * [0] 1800
---- .100
-model          .100
-connection     dongle
-battery         63%
-hub battery     99%
-polling rate   4000 Hz
-mouse light    on  #FF823C
-dongle light   on  solid  #FFB955  bright=4/4
-dpi            stage 0 of 1
-  * [0] 1800         #FFFFFF
 ```
 
 Written because the configurator is browser-only, which means the mouse can't
 take part in desk automation — turning the lights off with everything else,
-switching polling rate per game, putting battery in a status bar.
+switching polling rate per game, putting battery in a status bar, giving a
+side button a key the configurator's picker doesn't offer.
 
 ## Install
 
@@ -65,8 +63,9 @@ Master) first — they hold the device open and `aminf` will tell you so.
 
 ## Usage
 
-Every connected mouse gets the command. With both dongles plugged in,
-`aminf all off` darkens both. Use `--mouse 97` or `--mouse 100` to pick one.
+The script finds whichever mouse is connected on its own. With both dongles
+plugged in, every connected mouse gets the command — `aminf all off` darkens
+both. Use `--mouse 97` or `--mouse 100` to pick one.
 
 ```
 aminf status                      # everything the device reports
@@ -86,10 +85,12 @@ aminf mouse-light color '#FF823C' # .97 only
 aminf all off                     # dongle + mouse in one go
 
 aminf rate 4000                   # 125 250 500 1000 2000 4000 8000
-aminf dpi                         # list stages
-aminf dpi select 1
-aminf dpi set 0 1600              # x = y
-aminf dpi set 0 1600 1400         # independent
+
+aminf remap                       # what the side buttons send
+aminf remap forward F24           # side button -> a key: F1-F24, or a HID usage like 0x47
+aminf remap forward default       # back to a normal Forward button
+aminf remap back F23
+
 aminf lod 0                       # .97 only
 aminf toggle motionsync on        # .97 only
 aminf profile 1                   # .97 only
@@ -99,6 +100,10 @@ On a .100, the .97-only commands print a "skipped" notice and change nothing.
 
 Global flags: `--mouse auto|97|100`, `--device auto|dongle|usb`, `--json`,
 `--quiet`, `--dry-run`. Exit codes: `0` ok, `1` no device, `2` command failed.
+
+`--dry-run` prints the packets instead of sending them. On the .100, writes
+that need a read first (rate, mouse light) say which byte of the parameter
+block would change.
 
 ## What works on which mouse
 
@@ -111,7 +116,7 @@ Global flags: `--mouse auto|97|100`, `--device auto|dongle|usb`, `--json`,
 | mouse light on / off / toggle | ✓ | ✓ |
 | mouse light colour | ✓ | — |
 | polling rate | ✓ | ✓ |
-| DPI stages (list / set / select) | ✓ | ✓ |
+| side buttons (forward / back) → key or default | ✓ | ✓ |
 | LOD, sensor toggles, profile, raw | ✓ | — |
 
 The **.100** dongle takes any colour even though the web UI only offers
@@ -119,6 +124,12 @@ seven swatches — `aminf light color '#FFB955'` sets it exactly.
 
 The **.97** dongle stores hue and saturation instead of RGB, so a hex colour
 is converted and may not match exactly.
+
+**Remap** takes any keyboard HID usage from `0x04` to `0xE7`. The
+configurator's key picker stops at F12, but both firmwares accept the full
+range, so F13–F24 work from here — handy for keys nothing else on the system
+uses. After every remap the script reads the mapping back and only reports
+success once the mouse confirms it.
 
 ## How it works
 
@@ -152,6 +163,11 @@ which is what the configurator does behind its switches too.
 hex colours are converted before sending (`hex_to_hue_sat`). The mouse does
 store literal RGB. Speed is stored with 80 added to it.
 
+**Key remap** is `setKeyRemap [key id][type][params]`. Key ids: 1 left,
+2 right, 3 middle, 4 forward, 5 back. A button's own function is the type
+equal to its key id; type 6 is a keyboard key with
+`[consumer lo][consumer hi][hid usage][modifiers]`.
+
 ### .100
 
 Every packet is 64 bytes in a feature report:
@@ -166,15 +182,20 @@ checksum = 255 - (sum of the first 7 bytes & 255)
   bytes). Option `0`–`6` picks a preset swatch; anything else uses the RGB
   bytes.
 * **Mouse settings** — polling rate, mouse light and more — live in one
-  64-byte parameter block (`211` read / `83` write). DPI has its own
-  64-byte block (`212` read / `84` write): active stage, stage count, then
-  X, Y and colour for each of 8 stages. Like the configurator,
+  64-byte parameter block (`211` read / `83` write). Like the configurator,
   the script reads the whole block, changes only the bytes it needs, and
   writes the whole block back. It refuses to write if the read failed.
+* **Key map** is per profile: `208 [profile] [0]` returns 64 bytes with no
+  command echo, four bytes per button (forward at 12, back at 16). A mouse
+  function is `[1, 0, code, 0]`, a keyboard key `[0, usage, 0, 0]`. A write
+  is `80 [profile] [button] 0 0 0 0 [checksum]` followed by the four bytes.
+  The script reads the map back to confirm, and if the mouse hasn't taken
+  it, writes once more on the configurator's own retry schedule.
 * **Over 2.4G**, commands for the mouse are relayed through the dongle with a
   short handshake: open the channel (`F6 05`), wait until the dongle's status
   (`F7`) says it's ready, set the length (`FE 40`), send, wait, and for reads
-  fetch the answer (`FC`).
+  fetch the answer (`FC`). If the status says the mouse is off, the script
+  says so once and skips the remaining mouse reads instead of retrying each.
 * The report id isn't known in advance, so the script finds it with the same
   read-only health check the configurator runs.
 
@@ -198,9 +219,9 @@ in the bytes distinguishing them — a "read" of an id that happens to be
 anything not on the block list, so treat it accordingly.
 
 **.100:** the opposite approach — an allow-list. `M100_ALLOWED` holds the only
-fourteen commands the script will ever send. Reset, clear-Bluetooth and every
-boot / firmware-update command are simply not in it, and devices in
-firmware-update mode are ignored. There's no `raw` for the .100.
+fourteen commands the script will ever send. Reset, clear-Bluetooth, the DPI
+block and every boot / firmware-update command are simply not in it, and
+devices in firmware-update mode are ignored. There's no `raw` for the .100.
 
 Nothing here writes firmware. The worst realistic outcome is a setting you
 have to change back.
@@ -212,24 +233,45 @@ Both protocols were read out of the configurator's JS bundle.
 **.97** — cross-checked against WebHID captures. Observed on real hardware:
 `getBattery`, `getDongleBattery`, `getProfile`, `getReportRate`,
 `setReportRate`, `getDongleLight`, `setDongleLight`, `readNvData`, `saveRgb`,
-`setRgbRealtime`, `setLightSettings`. The rest — DPI, LOD, sensor toggles,
-sleep timers, rotation, key remapping — are transcribed from the bundle and
-encoded correctly as far as the source shows, but haven't been exercised.
+`setRgbRealtime`, `setLightSettings`, `getKeyRemap`. The rest — LOD, sensor
+toggles, profile switching, `setKeyRemap` — are transcribed from the bundle
+and encoded correctly as far as the source shows, but haven't been exercised.
+A remap write is confirmed by reading the mapping back, so a wrong encoding
+fails loudly rather than silently.
 
-**.100** — run on real hardware over the 2.4G dongle: status, dongle light
-on/off and colour, mouse light on/off, polling rate. DPI (list / set /
-select) is transcribed from the bundle but hasn't been exercised yet.
+**.100** — every packet the script builds and every reply it parses was
+compared byte for byte against the configurator bundle, then run on real
+hardware over the 2.4G dongle: status, dongle light on/off and colour, mouse
+light on/off, polling rate 1000 and 4000 Hz, side-button remap to F24 and
+back to default. All confirmed by reading the device back.
 
 Both mice have only been tested with the dongle connected. The USB-direct
 paths are implemented (`--device usb`) but unconfirmed. Reports welcome.
 
 ## Not implemented
 
-Key remapping and macros, on either mouse. The command ids and payload
-shapes are in the bundle if someone wants them. Worth noting: the .97's
-key-remap type table has no tap/hold distinction, so per-button tap-vs-hold
-bindings aren't achievable in firmware as it stands — that one needs Angry
-Miao.
+**DPI.** It was in 2.0 and was taken out in 2.2. The configurator addresses
+the .100's DPI block per profile, the old code didn't, and nobody here
+changes DPI from a script anyway — so rather than ship a half-verified write
+path, it's gone, and the DPI commands aren't in the .100 allow-list. The
+.97's DPI command ids are still listed in `CMD` for reference.
+
+**Macros**, on either mouse, and remapping of anything but the two side
+buttons. The command ids and payload shapes are in the bundle if someone
+wants them. Worth noting: the .97's key-remap type table has no tap/hold
+distinction, so per-button tap-vs-hold bindings aren't achievable in
+firmware as it stands — that one needs Angry Miao.
+
+## Changes
+
+**2.2.0** — side-button remap (`aminf remap`) on both mice, F13–F24 included.
+DPI removed. .100: protocol checked byte for byte against the configurator
+and tested on hardware; status does one parameter read instead of three;
+a mouse that's off is reported once instead of timing out per read; the
+key-map read rejects stale replies; remap retries like the configurator;
+`--dry-run` shows the whole packet and previews parameter-block writes.
+
+**2.0.0** — AM Infinity .100 support.
 
 ## Licence
 
