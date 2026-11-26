@@ -1,0 +1,95 @@
+{
+ "KeyMatrix": {
+  "0x01": [
+   1
+  ],
+  "0x02": [
+   2
+  ],
+  "0x03": [
+   3
+  ],
+  "0x04": [
+   4
+  ],
+  "0x05": [
+   5
+  ],
+  "0x06": [
+   12
+  ],
+  "0x07": [
+   13
+  ]
+ },
+ "mouseArgs": {
+  "reportRate": 4000,
+  "currentID": 0,
+  "currentProfile": 0,
+  "DPIsyn": 1,
+  "xDPI": [
+   1800,
+   800,
+   1200,
+   1600,
+   3200,
+   6400,
+   10000,
+   30000
+  ],
+  "yDPI": [
+   1800,
+   800,
+   1200,
+   1600,
+   3200,
+   6400,
+   10000,
+   30000
+  ],
+  "DPIcolor": [
+   "#FFFFFF",
+   "#FF8000",
+   "#FFFF00",
+   "#00FF00",
+   "#00FFFF",
+   "#0000FF",
+   "#8B00FF",
+   "#FFFFFF"
+  ],
+  "DPIStages": 1,
+  "getDPIButton": 0,
+  "wireDebounce": 0,
+  "rf24gDebounce": 0,
+  "btDebounce": 0,
+  "MotionSync": 1,
+  "LOD": 0,
+  "AngleSnapping": 0,
+  "RippleCtrl": 0,
+  "CurrentProfile": "1",
+  "AM35FPStatus": 0,
+  "AM35rotateAngleSwitch": 0,
+  "setAM35rotateAngle": 0,
+  "sleepTime24G": 180,
+  "sleepTimeBT": 60
+ },
+ "lightData": {
+  "mouseLightSwitch": "1",
+  "mouseLightType": "Solid",
+  "mouseLightSpeed": 1,
+  "mouseLightRGB": [
+   "#FF823C"
+  ],
+  "dongleLightSwitch": "1",
+  "dongleLightType": 1,
+  "dongleColor": "#ff4c00",
+  "dongleSaturationPer": 75,
+  "dongleColor2": "#b100ff",
+  "dongleSaturationPer2": 100,
+  "dongleColor3": "#b100ff",
+  "dongleSaturationPer3": 100,
+  "dongleSpeed": 12,
+  "dongleBrightness": 120
+ },
+ "mouseMacroData": []
+}

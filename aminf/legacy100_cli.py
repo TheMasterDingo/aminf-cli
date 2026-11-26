@@ -8,7 +8,7 @@ from aminf.errors import AmError, Unsupported
 from aminf.keys import key_name, parse_remap_key
 
 NOT_YET = {"toggle", "lod", "profile", "raw", "dpi", "sleep", "debounce",
-           "angle"}
+           "angle", "export", "import"}
 NOT_YET_LIGHT = {"brightness", "speed", "effect"}
 SIDE_BUTTONS = ("forward", "back")
 

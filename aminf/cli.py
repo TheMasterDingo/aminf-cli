@@ -12,7 +12,7 @@ import json
 import re
 import sys
 
-from aminf import __version__, legacy100_cli
+from aminf import __version__, legacy100_cli, profile
 from aminf.actions import BUTTON_NAMES, format_action
 from aminf.colour import hue_to_hex
 from aminf.device import Mouse
@@ -252,6 +252,17 @@ def build_parser():
     p = sub.add_parser("profile", help="show or switch the onboard profile")
     p.add_argument("index", type=int, nargs="?")
 
+    p = sub.add_parser("export", help="save the active profile to a file")
+    p.add_argument("file")
+
+    p = sub.add_parser("import", help="make the active profile match a file")
+    p.add_argument("file", help="an aminf export, or the web configurator's "
+                                ".97 export")
+    p.add_argument("--only", help="comma-separated sections: "
+                                  + ", ".join(profile.GROUPS))
+    p.add_argument("--dry-run", dest="import_dry", action="store_true",
+                   help="show what would change and write nothing")
+
     p = sub.add_parser("raw", help="send one read command and print the "
                                    "reply (.97 and .100R2)")
     p.add_argument("cmd_id", help="decimal or 0x-prefixed")
@@ -433,6 +444,40 @@ def cmd_angle(m, args, say):
         say(f"sensor angle -> {n}")
 
 
+def cmd_export(m, args, say):
+    doc = profile.snapshot(m)
+    try:
+        with open(args.file, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(doc, fh, indent=2)
+            fh.write("\n")
+    except OSError as exc:
+        raise AmError(f"cannot write {args.file}: {exc.strerror or exc}") from None
+    say(f"exported {m.model.name} profile {doc['profile']} -> {args.file}")
+
+
+def cmd_import(m, args, say):
+    doc = profile.load(args.file)
+    only = ([x.strip() for x in args.only.split(",") if x.strip()]
+            if args.only else None)
+    dry = args.dry_run or args.import_dry
+    warnings = profile.validate(doc, m.model, only)
+    for note in doc.get("notes", []):
+        say(f"note: {note}")
+    for warning in warnings:
+        say(f"warning: {warning}")
+    active = m.profile()
+    if doc.get("profile") is not None and active is not None             and doc["profile"] != active:
+        say(f"note: the file was saved from profile {doc['profile']}; "
+            f"writing to the active profile, {active}")
+    results = profile.apply(m, doc, only, dry)
+    for section, status, detail in results:
+        print(f"{section:<13} {status}{'  ' + detail if detail else ''}")
+    bad = [section for section, status, _ in results if status == "failed"]
+    if bad:
+        raise AmError(f"import stopped at '{bad[0]}'; sections before it "
+                      f"were applied, sections after it were not")
+
+
 def to_int(text, what):
     try:
         return int(text, 0)
@@ -483,6 +528,10 @@ def run_command(m, args, say):
         else:
             m.set_profile(args.index)
             say(f"profile -> {args.index}")
+    elif c == "export":
+        cmd_export(m, args, say)
+    elif c == "import":
+        cmd_import(m, args, say)
     elif c == "raw":
         if m.model.family != "race":
             raise Unsupported(f"'raw' is not available on the {m.model.name}")
@@ -497,12 +546,23 @@ def main(argv=None, backend=None):
         backend = HidapiBackend()
     say_base = (lambda *a: None) if args.quiet else print
 
-    mice, errors = open_mice(backend, args.mouse, args.device, args.dry_run)
+    # export and import read the device even in a dry run; import then
+    # writes nothing.
+    whole_profile = args.cmd in ("export", "import")
+    mice, errors = open_mice(backend, args.mouse, args.device,
+                             args.dry_run and not whole_profile)
     if not mice:
         for e in errors or ["No AM Infinity mouse found. Plug in the 2.4G "
                             "dongle or connect the mouse by cable."]:
             print(e, file=sys.stderr)
         return 1
+    if whole_profile and len(mice) > 1:
+        for m in mice:
+            m.close()
+        print(f"{args.cmd} works on one mouse at a time and "
+              f"{len(mice)} are connected: add --mouse "
+              f"{'|'.join(m.model.key for m in mice)}", file=sys.stderr)
+        return 2
 
     several = len(mice) > 1
     failed = False
