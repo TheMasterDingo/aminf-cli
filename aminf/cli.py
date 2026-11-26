@@ -1,74 +1,73 @@
-"""Command line: parse what was typed, run it on each mouse, print the result."""
+"""Command line: parse what was typed, run it on each mouse, print the result.
+
+Commands talk to a mouse only through the sections every model offers
+(aminf.device.SECTIONS), so nothing here knows which protocol is in use.
+The two exceptions are `status` and `light status`, whose output keeps the
+exact shape 2.2.0 gave each model.
+"""
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 
-from aminf import __version__
-from aminf.colour import hex_to_hue_sat, hue_to_hex
+from aminf import __version__, legacy100_cli
+from aminf.actions import BUTTON_NAMES, format_action
+from aminf.colour import hue_to_hex
+from aminf.device import Mouse
 from aminf.discover import open_mice
 from aminf.errors import AmError, MouseOffline, Unsupported
-from aminf.keys import key_name, parse_remap_key
 from aminf.models import MODELS
-from aminf.race.device import DONGLE_EFFECTS, MOUSE_EFFECTS, VALID_RATES, RaceMouse
-
-REMAP_KEY_ID = RaceMouse.REMAP_KEY_ID
+from aminf.race.device import DONGLE_EFFECTS, MOUSE_EFFECTS, VALID_RATES
 from aminf.transport import HidapiBackend
 
-
-# --------------------------------------------------------------------- CLI
-
-FLAGS = {
-    "motionsync": "setMotionSync",
-    "anglesnap": "setAngleSnapping",
-    "ripple": "setRippleControl",
-    "fpsmode": "setFpsMode",
+TOGGLES = {
+    "motionsync": "motion_sync",
+    "anglesnap": "angle_snap",
+    "ripple": "ripple",
+    "fpsmode": "fps_mode",
+    "profilekey": "profile_key",
 }
+RADIOS = {"wired": "debounce_wired", "2.4g": "debounce_24g",
+          "bt": "debounce_bt"}
+SLEEP_KEYS = {"2.4g": "sleep_24g", "bt": "sleep_bt"}
 
-# Commands only the .97 implements here. On a .100 they're skipped with a
-# notice instead of guessing at an untested encoding.
-ONLY_97 = {"toggle", "lod", "profile", "raw"}
-ONLY_97_LIGHT = {"brightness", "speed", "effect"}
+# The configurator asks before enabling this; a command line can only say it.
+FPS_WARNING = ("note: FPS (blast) mode raises computer resource usage and "
+               "shortens mouse battery life")
 
 
-def collect_status(m):
-    if m.model.family == "m100":
-        params = None if m.dry_run else m._params_or_none()
-        return {
-            "model": m.model.name,
-            "connection": "dongle" if m.dongle else "usb",
-            "battery": m.battery(),
-            "hub_battery": m.hub_battery(),
-            "profile": m.profile(),
-            "polling_rate": m.polling_rate(params) if params else None,
-            "mouse_light": m.mouse_light(params) if params else None,
-            "dongle_light": m.dongle_light(),
-            "mouse_offline": m.offline,
-        }
-    def quiet(read):
-        # A mouse that is asleep is reported once, not once per line.
-        try:
-            return read()
-        except MouseOffline:
-            return None
+def on_off(v):
+    return "on" if v else "off"
 
-    return {
-        "model": m.model.name,
-        "connection": "dongle" if m.has_dongle else "usb",
-        "battery": quiet(m.battery),
-        "hub_battery": m.hub_battery(),
-        "profile": quiet(m.profile),
-        "polling_rate": quiet(m.polling_rate),
-        "lod": quiet(lambda: m.get("lod")),
-        "motion_sync": quiet(lambda: m.get("motion_sync")),
-        "angle_snapping": quiet(lambda: m.get("angle_snap")),
-        "ripple_control": quiet(lambda: m.get("ripple")),
-        "mouse_light": quiet(m.mouse_light),
-        "mouse_colour": quiet(m.mouse_colour),
-        "dongle_light": m.dongle_light(),
-        "mouse_offline": m.offline,
-    }
+
+def show_action(text):
+    """An action string as shown to a person: function keys in capitals."""
+    return re.sub(r"\bf(\d{1,2})\b", r"F\1", text)
+
+
+def hex_arg(text):
+    return f"#{text.lstrip('#').upper()}"
+
+
+# ------------------------------------------------------------------ status
+
+def quiet(read):
+    """A value, or None when the mouse is asleep: status reports that once
+    instead of failing."""
+    try:
+        return read()
+    except MouseOffline:
+        return None
+
+
+def collect_status(m, full=False):
+    s = m.status_2_2()
+    if full:
+        for section in ("sensor", "power", "dpi", "buttons"):
+            s[section] = quiet(lambda: m.read(section))
+    return s
 
 
 def print_status(s):
@@ -86,42 +85,86 @@ def print_status(s):
     print(f"polling rate   {f'{rate} Hz' if rate else '--'}")
 
     if s["model"] == ".100":
-        if s.get("mouse_offline"):
-            print("mouse          off or out of range (dongle values only)")
-        ml = s["mouse_light"]
-        if ml:
-            extra = (f" / charged {ml['colour_charged']}"
-                     if "colour_charged" in ml else "")
-            print(f"mouse light    {'on' if ml['on'] else 'off'}  "
-                  f"{ml['colour']}{extra}")
-        dl = s["dongle_light"]
-        if dl:
-            line = f"dongle light   {'on' if dl['on'] else 'off'}"
-            if "colour" in dl:
-                line += (f"  {dl['effect_name']}  {dl['colour']}"
-                         f"{' (preset)' if dl['preset'] else ''}"
-                         f"  bright={dl['brightness']}/4")
-            print(line)
+        legacy100_cli.print_status_tail(s)
         return
 
     if s.get("mouse_offline"):
         print("mouse          off or out of range (dongle values only)")
-    print(f"lift-off dist  {s['lod']}")
-    print(f"sensor         motion-sync={s['motion_sync']}  "
-          f"angle-snap={s['angle_snapping']}  ripple={s['ripple_control']}")
+    else:
+        print(f"lift-off dist  {s['lod']}")
+        print(f"sensor         motion-sync={s['motion_sync']}  "
+              f"angle-snap={s['angle_snapping']}  ripple={s['ripple_control']}")
     ml = s["mouse_light"]
     if ml:
-        print(f"mouse light    {'on' if ml['on'] else 'off'}  "
+        print(f"mouse light    {on_off(ml['on'])}  "
               f"{MOUSE_EFFECTS.get(ml['effect'], ml['effect'])}  "
               f"{s['mouse_colour'] or '--'}")
     dl = s["dongle_light"]
     if dl:
         name = next((k for k, v in DONGLE_EFFECTS.items()
                      if v == dl["effect"]), dl["effect"])
-        print(f"dongle light   {'on' if dl['on'] else 'off'}  {name}  "
+        print(f"dongle light   {on_off(dl['on'])}  {name}  "
               f"{hue_to_hex(dl['hue1'])} sat={dl['sat1']} "
               f"bright={dl['brightness']} speed={dl['speed']}")
+    print_full(s)
 
+
+def print_full(s):
+    """The extra lines of `status --full`."""
+    dpi = s.get("dpi")
+    if dpi:
+        stage = dpi["stages"][dpi["active"]]
+        xy = f"{stage['x']}" + (f" x {stage['y']}" if stage["y"] != stage["x"] else "")
+        print(f"dpi            {xy}  (stage {dpi['active'] + 1} of {dpi['count']}"
+              f"{', button ' + on_off(dpi['button']) if 'button' in dpi else ''})")
+    power = s.get("power")
+    if power:
+        print(f"sleep          {sleep_line(power)}")
+        print(f"debounce       {debounce_line(power)}")
+    sensor = s.get("sensor")
+    if sensor and "angle" in sensor:
+        print(f"sensor angle   {angle_text(sensor)}")
+    if sensor and "fps_mode" in sensor:
+        print(f"fps mode       {on_off(sensor['fps_mode'])}")
+    buttons = s.get("buttons")
+    if buttons:
+        model = next(m for m in MODELS.values() if m.name == s["model"])
+        changed = [f"{b} -> {show_action(a)}" for b, a in buttons.items()
+                   if a != format_action(model.default_action(b))]
+        print(f"buttons        {', '.join(changed) if changed else 'all default'}")
+
+
+def seconds(v):
+    return "never" if v == "never" else f"{v} s"
+
+
+def sleep_line(p):
+    parts = [f"{label} {seconds(p[key])}" for key, label in
+             (("sleep_24g", "2.4G"), ("sleep_bt", "Bluetooth")) if key in p]
+    deep = [f"{label} {seconds(p[key])}" for key, label in
+            (("deep_sleep_24g", "2.4G"), ("deep_sleep_bt", "Bluetooth"))
+            if key in p]
+    return "  ".join(parts) + (f"   deep sleep: {'  '.join(deep)}" if deep else "")
+
+
+def debounce_line(p):
+    parts = [f"{label} {p[key]}" for key, label in
+             (("debounce_wired", "wired"), ("debounce_24g", "2.4G"),
+              ("debounce_bt", "Bluetooth")) if key in p]
+    hw = ""
+    if "hw_debounce_press" in p:
+        hw = (f"   hardware (read-only): press {p['hw_debounce_press']}, "
+              f"release {p.get('hw_debounce_release', '--')}")
+    return "  ".join(parts) + hw
+
+
+def angle_text(sensor):
+    if sensor.get("angle_enabled") is False:
+        return f"off ({sensor['angle']})"
+    return str(sensor["angle"])
+
+
+# ------------------------------------------------------------------ parser
 
 def build_parser():
     ap = argparse.ArgumentParser(
@@ -142,7 +185,9 @@ def build_parser():
                     help="print the frames instead of sending them")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("status", help="show everything the device reports")
+    p = sub.add_parser("status", help="show what the device reports")
+    p.add_argument("--full", action="store_true",
+                   help="also DPI, sleep, debounce and buttons (slower)")
 
     p = sub.add_parser("light", help="dongle lighting")
     ls = p.add_subparsers(dest="action", required=True)
@@ -151,7 +196,7 @@ def build_parser():
     q = ls.add_parser("color", aliases=["colour"]); q.add_argument("hex")
     q = ls.add_parser("brightness"); q.add_argument("value", type=int)
     q = ls.add_parser("speed"); q.add_argument("value", type=int)
-    q = ls.add_parser("effect"); q.add_argument("name", choices=DONGLE_EFFECTS)
+    q = ls.add_parser("effect"); q.add_argument("name")
 
     p = sub.add_parser("mouse-light", help="mouse lighting")
     ms = p.add_subparsers(dest="action", required=True)
@@ -165,145 +210,282 @@ def build_parser():
     p = sub.add_parser("rate", help="polling rate in Hz")
     p.add_argument("hz", type=int, choices=VALID_RATES)
 
-    p = sub.add_parser("toggle", help="sensor options (.97)")
-    p.add_argument("feature", choices=sorted(FLAGS))
+    p = sub.add_parser("dpi", help="DPI stages")
+    ds = p.add_subparsers(dest="action")
+    q = ds.add_parser("set", help="set one stage")
+    q.add_argument("stage", type=int, help="stage number, from 1")
+    q.add_argument("x", type=int)
+    q.add_argument("--y", type=int, help="a different vertical DPI")
+    q.add_argument("--color", "--colour", dest="color",
+                   help="the stage's indicator colour, #RRGGBB")
+    q = ds.add_parser("stages", help="how many stages the DPI button cycles")
+    q.add_argument("count", type=int)
+    q = ds.add_parser("use", help="make a stage the active one")
+    q.add_argument("stage", type=int, help="stage number, from 1")
+    q = ds.add_parser("button", help="enable or disable the DPI button")
+    q.add_argument("state", choices=["on", "off"])
+
+    p = sub.add_parser("remap", help="what each button sends")
+    p.add_argument("button", nargs="?", choices=BUTTON_NAMES)
+    p.add_argument("action", nargs="?",
+                   help="a key (f13, ctrl+shift+a, 0x47), media:<name>, a "
+                        "mouse function, dpi-up/down/cycle, profile-switch, "
+                        "disabled or default")
+
+    p = sub.add_parser("toggle", help="sensor options")
+    p.add_argument("feature", choices=sorted(TOGGLES))
     p.add_argument("state", choices=["on", "off"])
 
-    p = sub.add_parser("lod", help="lift-off distance, 0 low .. 2 high (.97)")
-    p.add_argument("value", type=int, choices=[0, 1, 2])
+    p = sub.add_parser("lod", help="lift-off distance, 0 is lowest")
+    p.add_argument("value", type=int)
 
-    p = sub.add_parser("profile", help="switch onboard profile (.97)")
-    p.add_argument("index", type=int)
+    p = sub.add_parser("sleep", help="idle time before the mouse sleeps")
+    p.add_argument("radio", nargs="?", choices=sorted(SLEEP_KEYS))
+    p.add_argument("seconds", nargs="?", help="seconds, or 'never'")
 
-    p = sub.add_parser("remap", help="what a side button sends")
-    p.add_argument("button", nargs="?", choices=sorted(REMAP_KEY_ID))
-    p.add_argument("key", nargs="?",
-                   help="F1-F24, a HID usage like 0x47, or 'default'")
+    p = sub.add_parser("debounce", help="button debounce")
+    p.add_argument("args", nargs="*", metavar="[wired|2.4g|bt] N")
 
-    p = sub.add_parser("raw",
-                       help="send one command id and print the reply (.97)")
+    p = sub.add_parser("angle", help="sensor rotation, -90..90 or off")
+    p.add_argument("value", nargs="?")
+
+    p = sub.add_parser("profile", help="show or switch the onboard profile")
+    p.add_argument("index", type=int, nargs="?")
+
+    p = sub.add_parser("raw", help="send one read command and print the "
+                                   "reply (.97 and .100R2)")
     p.add_argument("cmd_id", help="decimal or 0x-prefixed")
     p.add_argument("--to", default="0x80", help="device id (0x00 or 0x80)")
 
     return ap
 
 
+# ---------------------------------------------------------------- commands
+
 def light_state(cur, action):
     return (not cur["on"]) if (action == "toggle" and cur) else (action == "on")
 
 
+def emit(args, model, data, lines):
+    """A read-only result: JSON with --json, text otherwise."""
+    if args.json:
+        print(json.dumps(dict(data, model=model.name), indent=2))
+    else:
+        for line in lines:
+            print(line)
+
+
+def need(value, what="settings"):
+    if value is None:
+        raise AmError(f"could not read the {what}")
+    return value
+
+
+def cmd_light(m, args, say):
+    dongle = args.cmd == "light"
+    section = "dongle_light" if dongle else "light"
+    what = "dongle" if dongle else "mouse"
+    a = args.action
+    if a == "status":
+        cur = m.light_status_2_2(dongle)
+        if not cur:
+            raise AmError("no reply")
+        print(json.dumps(dict(cur, model=m.model.name), indent=2))
+    elif a in ("on", "off", "toggle"):
+        if dongle and m.connection != "dongle":
+            raise AmError("dongle lighting needs the 2.4G dongle connected")
+        cur = None if m.dry_run else m.read(section)
+        on = light_state(cur, a)
+        m.write(section, {"on": on})
+        say(f"{what} light -> {on_off(on)}")
+    elif a in ("color", "colour"):
+        done = m.write(section, {"colour": args.hex})
+        extra = (f" (hue {done['hue1']}, sat {done['sat1']})"
+                 if "hue1" in done else "")
+        say(f"{what} colour -> {hex_arg(args.hex)}{extra}")
+    elif a in ("brightness", "speed"):
+        m.write(section, {a: args.value})
+        say(f"dongle {a} -> {args.value}")
+    elif a == "effect":
+        m.write(section, {"effect": args.name})
+        say(f"dongle effect -> {args.name}")
+
+
+def cmd_all(m, args, say):
+    if m.connection == "dongle":
+        cur = None if m.dry_run else m.read("dongle_light")
+        on = light_state(cur, args.action)
+        m.write("dongle_light", {"on": on})
+        say(f"dongle light -> {on_off(on)}")
+    else:
+        say("no dongle connected -- dongle lighting skipped")
+    cur = None if m.dry_run else m.read("light")
+    on = light_state(cur, args.action)
+    m.write("light", {"on": on})
+    say(f"mouse light -> {on_off(on)}")
+
+
+def cmd_dpi(m, args, say):
+    a = args.action
+    if a is None:
+        d = need(m.read("dpi"), "DPI settings")
+        lines = [f"active stage   {d['active'] + 1} of {d['count']}"]
+        if "button" in d:
+            lines.append(f"dpi button     {on_off(d['button'])}")
+        for i, st in enumerate(d["stages"]):
+            mark = "*" if i == d["active"] else " "
+            xy = f"{st['x']}" + (f" x {st['y']}" if st["y"] != st["x"] else "")
+            unused = "" if i < d["count"] else "  (not in the cycle)"
+            lines.append(f"stage {i + 1}      {mark} {xy:<14}"
+                         f"{st.get('colour') or '':<9}{unused}".rstrip())
+        emit(args, m.model, d, lines)
+    elif a == "set":
+        change = {"x": args.x}
+        if args.y is not None:
+            change["y"] = args.y
+        if args.color:
+            change["colour"] = args.color
+        m.write("dpi", {"stages": {args.stage - 1: change}})
+        y = f" x {args.y}" if args.y is not None else ""
+        colour = f"  {hex_arg(args.color)}" if args.color else ""
+        say(f"dpi stage {args.stage} -> {args.x}{y}{colour}")
+    elif a == "stages":
+        m.write("dpi", {"count": args.count})
+        say(f"dpi stages -> {args.count}")
+    elif a == "use":
+        m.write("dpi", {"active": args.stage - 1})
+        say(f"dpi stage -> {args.stage}")
+    elif a == "button":
+        m.write("dpi", {"button": args.state == "on"})
+        say(f"dpi button -> {args.state}")
+
+
+def cmd_remap(m, args, say):
+    if args.button and args.action:
+        done = m.write("buttons", {args.button: args.action})
+        got = done.get(args.button, args.action)
+        default = args.action.strip().lower() == "default"
+        say(f"{args.button} -> {show_action(got)}"
+            f"{' (default)' if default else ''}")
+        return
+    buttons = need(m.read("buttons"), "button map")
+    if args.button:
+        if args.button not in buttons:
+            raise Unsupported(f"the {m.model.name} has no '{args.button}' "
+                              f"button")
+        buttons = {args.button: buttons[args.button]}
+    lines = []
+    for b, action in buttons.items():
+        own = action == format_action(m.model.default_action(b))
+        lines.append(f"{b:<10} {show_action(action)}"
+                     f"{' (default)' if own else ''}")
+    emit(args, m.model, buttons, lines)
+
+
+def cmd_sleep(m, args, say):
+    if args.radio is None:
+        p = need(m.read("power"), "sleep times")
+        emit(args, m.model, {k: v for k, v in p.items() if "sleep" in k},
+             [f"sleep          {sleep_line(p)}"])
+        return
+    if args.seconds is None:
+        raise AmError("give a number of seconds, or 'never'")
+    value = "never" if args.seconds.lower() == "never" else to_int(args.seconds, "seconds")
+    m.write("power", {SLEEP_KEYS[args.radio]: value})
+    say(f"sleep {args.radio} -> {seconds(value)}")
+
+
+def cmd_debounce(m, args, say):
+    a = args.args
+    if not a:
+        p = need(m.read("power"), "debounce settings")
+        emit(args, m.model, {k: v for k, v in p.items() if "debounce" in k},
+             [f"debounce       {debounce_line(p)}"])
+    elif len(a) == 1:
+        n = to_int(a[0], "debounce")
+        m.write("power", {key: n for key in RADIOS.values()})
+        say(f"debounce -> {n}")
+    elif len(a) == 2 and a[0] in RADIOS:
+        n = to_int(a[1], "debounce")
+        m.write("power", {RADIOS[a[0]]: n})
+        say(f"debounce {a[0]} -> {n}")
+    else:
+        raise AmError("usage: aminf debounce [wired|2.4g|bt] <n>")
+
+
+def cmd_angle(m, args, say):
+    if args.value is None:
+        s = need(m.read("sensor"), "sensor settings")
+        if "angle" not in s:
+            raise Unsupported(f"the {m.model.name} reports no sensor angle")
+        emit(args, m.model, {k: s[k] for k in ("angle", "angle_enabled") if k in s},
+             [f"sensor angle   {angle_text(s)}"])
+    elif args.value.lower() == "off":
+        m.write("sensor", {"angle_enabled": False} if m.model.angle_switch
+                else {"angle": 0})
+        say("sensor angle -> off")
+    else:
+        n = to_int(args.value, "angle")
+        change = {"angle": n}
+        if m.model.angle_switch:
+            change["angle_enabled"] = True
+        m.write("sensor", change)
+        say(f"sensor angle -> {n}")
+
+
+def to_int(text, what):
+    try:
+        return int(text, 0)
+    except ValueError:
+        raise AmError(f"{what} must be a number, not '{text}'") from None
+
+
 def run_command(m, args, say):
     """Run one command on one mouse. Returns data for --json status."""
+    if not isinstance(m, Mouse):            # the .100 until its new driver
+        return legacy100_cli.run_command(m, args, say, print_status)
     c = args.cmd
-    is100 = m.model.family == "m100"
-    if is100 and (c in ONLY_97 or
-                  (c == "light" and args.action in ONLY_97_LIGHT) or
-                  (c == "mouse-light" and args.action in ("color", "colour"))):
-        what = c
-        if c in ("light", "mouse-light"):
-            what += " " + args.action
-        raise Unsupported(f"'{what}' is not available on the .100 yet "
-                          f"-- skipped")
-
     if c == "status":
-        s = collect_status(m)
+        s = collect_status(m, args.full)
         if not args.json:
             print_status(s)
         return s
-
     if c in ("light", "mouse-light"):
-        dongle = c == "light"
-        read = m.dongle_light if dongle else m.mouse_light
-        a = args.action
-        if a == "status":
-            cur = read()
-            if not cur:
-                raise AmError("no reply")
-            if dongle is False and not is100:
-                cur = dict(cur, colour=m.mouse_colour())
-            print(json.dumps(dict(cur, model=m.model.name), indent=2))
-        elif a in ("on", "off", "toggle"):
-            if dongle and not m.has_dongle:
-                raise AmError("dongle lighting needs the 2.4G dongle connected")
-            on = light_state(read(), a)
-            if is100:
-                (m.set_dongle_light if dongle else m.set_mouse_light)(on)
-            else:
-                (m.set_dongle_light if dongle else m.set_mouse_light)(on=on)
-            say(f"{'dongle' if dongle else 'mouse'} light -> "
-                f"{'on' if on else 'off'}")
-        elif a in ("color", "colour"):
-            if dongle and is100:
-                m.set_dongle_colour(args.hex)
-                say(f"dongle colour -> #{args.hex.lstrip('#').upper()}")
-            elif dongle:
-                hue, sat = hex_to_hue_sat(args.hex)
-                m.set_dongle_light(hue1=hue, sat1=sat)
-                say(f"dongle colour -> #{args.hex.lstrip('#').upper()} "
-                    f"(hue {hue}, sat {sat})")
-            else:
-                m.set_mouse_colour(args.hex)
-                say(f"mouse colour -> #{args.hex.lstrip('#').upper()}")
-        elif a == "brightness":
-            m.set_dongle_light(brightness=args.value)
-            say(f"dongle brightness -> {args.value}")
-        elif a == "speed":
-            m.set_dongle_light(speed=args.value)
-            say(f"dongle speed -> {args.value}")
-        elif a == "effect":
-            m.set_dongle_light(effect=DONGLE_EFFECTS[args.name])
-            say(f"dongle effect -> {args.name}")
-
+        cmd_light(m, args, say)
     elif c == "all":
-        if m.has_dongle:
-            on = light_state(m.dongle_light(), args.action)
-            if is100:
-                m.set_dongle_light(on)
-            else:
-                m.set_dongle_light(on=on)
-            say(f"dongle light -> {'on' if on else 'off'}")
-        else:
-            say("no dongle connected -- dongle lighting skipped")
-        on = light_state(m.mouse_light(), args.action)
-        if is100:
-            m.set_mouse_light(on)
-        else:
-            m.set_mouse_light(on=on)
-        say(f"mouse light -> {'on' if on else 'off'}")
-
+        cmd_all(m, args, say)
     elif c == "rate":
-        m.set_polling_rate(args.hz)
+        m.write("sensor", {"polling_rate": args.hz})
         say(f"polling rate -> {args.hz} Hz")
-
-    elif c == "toggle":
-        m.set_flag(FLAGS[args.feature], args.state == "on")
-        say(f"{args.feature} -> {args.state}")
-
-    elif c == "lod":
-        m.set_lod(args.value)
-        say(f"lift-off distance -> {args.value}")
-
-    elif c == "profile":
-        m.set_profile(args.index)
-        say(f"profile -> {args.index}")
-
+    elif c == "dpi":
+        cmd_dpi(m, args, say)
     elif c == "remap":
-        if args.button and args.key:
-            usage = parse_remap_key(args.key)
-            m.set_key_remap(args.button, usage)
-            say(f"{args.button} -> "
-                f"{'default' if usage is None else key_name(usage)}")
+        cmd_remap(m, args, say)
+    elif c == "toggle":
+        on = args.state == "on"
+        m.write("sensor", {TOGGLES[args.feature]: on})
+        say(f"{args.feature} -> {args.state}")
+        if args.feature == "fpsmode" and on:
+            say(FPS_WARNING)
+    elif c == "lod":
+        m.write("sensor", {"lod": args.value})
+        say(f"lift-off distance -> {args.value}")
+    elif c == "sleep":
+        cmd_sleep(m, args, say)
+    elif c == "debounce":
+        cmd_debounce(m, args, say)
+    elif c == "angle":
+        cmd_angle(m, args, say)
+    elif c == "profile":
+        if args.index is None:
+            emit(args, m.model, {"profile": need(m.profile(), "active profile")},
+                 [f"profile        {m.profile()}"] if not args.json else [])
         else:
-            buttons = [args.button] if args.button else sorted(REMAP_KEY_ID,
-                                                               reverse=True)
-            labels = {b: m.remap_label(b) for b in buttons}
-            if args.json:
-                print(json.dumps(dict(labels, model=m.model.name), indent=2))
-            else:
-                for b, label in labels.items():
-                    print(f"{b:<8} {label}")
-
+            m.set_profile(args.index)
+            say(f"profile -> {args.index}")
     elif c == "raw":
+        if m.model.family != "race":
+            raise Unsupported(f"'raw' is not available on the {m.model.name}")
         v = m.send(int(args.cmd_id, 0), device_id=int(args.to, 0))
         print(v.hex(" ") if v else "no reply")
     return None
@@ -335,13 +517,14 @@ def main(argv=None, backend=None):
                 if out is not None:
                     status_out.append(out)
             except Unsupported as exc:
-                say(str(exc))
+                say(f"{exc} -- skipped")
             except AmError as exc:
                 failed = True
                 print(f"{m.model.name}: {exc}", file=sys.stderr)
             except Exception as exc:                         # pragma: no cover
                 failed = True
-                print(f"{m.model.name}: {args.cmd} failed: {exc}", file=sys.stderr)
+                print(f"{m.model.name}: {args.cmd} failed: {exc}",
+                      file=sys.stderr)
     finally:
         for m in mice:
             m.close()
@@ -351,4 +534,3 @@ def main(argv=None, backend=None):
     for e in errors:
         print(e, file=sys.stderr)
     return 2 if failed else 0
-

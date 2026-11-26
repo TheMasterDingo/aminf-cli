@@ -27,6 +27,7 @@ class Model:
     sleep_nv_on_cable: bool = False   # cabled: sleep lives in an NV record
     profile_to_dongle: bool = False   # receiver keeps its own active profile
     layer_switch: bool = False   # a button can be made to switch profile
+    angle_switch: bool = False   # sensor rotation has its own on/off flag
 
     def default_action(self, button):
         """What `default` means for a button: its own function. For the
@@ -41,13 +42,14 @@ MODELS = {m.key: m for m in (
     Model(".97", "97", "race",
           usb_ids=((0x0E8D, 0x0880), (0x35A1, 0x0035)),
           dongle_ids=((0x0E8D, 0x0703),),
-          buttons=BUTTONS_7, profiles=3, lod_max=2, dpi_max=30000),
+          buttons=BUTTONS_7, profiles=3, lod_max=2, dpi_max=30000,
+          angle_switch=True),
     Model(".100R2", "100r2", "race",
           usb_ids=((0x0E8D, 0x0881),),
           dongle_ids=((0x0E8D, 0x0704),),
           buttons=BUTTONS_7 + ("bottom",), profiles=3, lod_max=4,
           dpi_max=30000, hw_debounce=True, sleep_nv_on_cable=True,
-          profile_to_dongle=True, layer_switch=True),
+          profile_to_dongle=True, layer_switch=True, angle_switch=True),
     Model(".100", "100", "m100",
           usb_ids=((0x3151, 0x402A),),
           dongle_ids=((0x3151, 0x5007),),

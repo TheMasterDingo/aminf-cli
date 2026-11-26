@@ -196,3 +196,19 @@ class FakeRace(Hid):
             nv = a[0] | (a[1] << 8)
             old = r[self._nv(nv)][5:]
             self._nv(nv, a[2:18] + old[16:])
+
+
+class Combined(Hid):
+    """Several simulated devices plugged in at once."""
+
+    def __init__(self, *fakes):
+        self.fakes = fakes
+
+    def enumerate(self):
+        return [i for f in self.fakes for i in f.enumerate()]
+
+    def open(self, path):
+        for f in self.fakes:
+            if any(i.path == path for i in f.enumerate()):
+                return f.open(path)
+        raise AssertionError(f"unexpected open of {path!r}")

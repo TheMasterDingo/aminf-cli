@@ -111,8 +111,8 @@ def test_r2_dongle_profile_switch_goes_to_both(r2):
 
 
 def test_97_profile_switch_goes_to_the_mouse_only():
-    mouse, fake = mouse_for("97")
-    assert mouse.set_profile(0) == 0
+    mouse, fake = mouse_for("97", fixture="97-dongle")
+    assert mouse.set_profile(2) == 2
     assert [d for d, c in fake.sent_pairs() if c == 12488] == [0x80]
 
 
@@ -140,6 +140,12 @@ def test_offline_mouse_reports_once_and_writes_nothing(r2):           # Review F
     assert r2[0].hub_battery()["percent"] == 100  # the dongle itself still answers
 
 
+def test_an_asleep_mouse_costs_one_read_and_one_probe(r2):
+    r2[1].offline = True
+    r2[0].status_2_2()
+    assert [c for d, c in r2[1].sent_pairs() if d == 0x80] == [12495, 12489]
+
+
 def test_missing_profile_key_is_absent(r2):                           # Review Focus 3
     r2[1].missing = {"12525:"}
     assert "profile_key" not in r2[0].read("sensor")
@@ -149,13 +155,25 @@ def test_missing_profile_key_is_absent(r2):                           # Review F
 
 
 def test_97_lod_range():
-    mouse, _ = mouse_for("97")
+    mouse, _ = mouse_for("97", fixture="97-dongle")
     with pytest.raises(AmError, match="0-2"):
         mouse.write("sensor", {"lod": 3})
 
 
+def test_97_reads_every_section():
+    mouse, _ = mouse_for("97", fixture="97-dongle")
+    s, p, d = mouse.read("sensor"), mouse.read("power"), mouse.read("dpi")
+    assert s["polling_rate"] == 4000 and s["lod"] == 0 and s["profile_key"] is True
+    assert (p["sleep_24g"], p["sleep_bt"]) == (180, 60)
+    assert d["count"] == 1 and d["active"] == 0 and d["stages"][0]["x"] == 1800 and d["button"] is False
+    assert mouse.read("light") == {"on": True, "effect": "solid", "speed": 1, "colour": "#FF823C"}
+    assert mouse.read("dongle_light")["brightness"] == 120
+    assert list(mouse.read("buttons")) == list(mouse.model.buttons)
+    assert mouse.battery()["percent"] == 16
+
+
 def test_97_has_no_hardware_debounce():
-    mouse, fake = mouse_for("97")
+    mouse, fake = mouse_for("97", fixture="97-dongle")
     assert "hw_debounce_press" not in mouse.read("power")
     assert 12491 not in fake.sent_cmds()
 

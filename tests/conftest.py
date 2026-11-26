@@ -51,6 +51,7 @@ def fast_timing(monkeypatch):
     monkeypatch.setattr(RaceMouse, "TIMEOUT", 0.02)
     monkeypatch.setattr(RaceMouse, "RELAY_TIMEOUT", 0.02)
     monkeypatch.setattr(RaceMouse, "ACK_TIMEOUT", 0.02)
+    monkeypatch.setattr(RaceMouse, "PROBE_TIMEOUT", 0.02)
     monkeypatch.setattr(RaceMouse, "VERIFY_DELAY", 0.0)
     monkeypatch.setattr(RaceMouse, "POLL", 0.0)
 
@@ -70,3 +71,11 @@ def r2():
 def r2fake():
     from tests.fakes import FakeRace
     return FakeRace(load("100r2-dongle"), "100r2", dongle=True)
+
+
+@pytest.fixture
+def two_mice_fake():
+    """A .97 and a .100R2, both on their dongles."""
+    from tests.fakes import Combined, FakeRace
+    fx = load("100r2-dongle")
+    return Combined(FakeRace(fx, "97"), FakeRace(fx, "100r2"))

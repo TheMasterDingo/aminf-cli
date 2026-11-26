@@ -14,7 +14,6 @@ from aminf.colour import hex_to_hue_sat, hex_to_rgb, hue_to_hex, rgb_to_hex
 from aminf.device import Mouse
 from aminf.errors import (AmError, DeviceBusy, DeviceNotFound, MouseOffline,
                           NotConfirmed, NotInFirmware, Refused, Unsupported)
-from aminf.keys import MODIFIER_NAMES, key_name
 from aminf.models import DPI_MIN, DPI_STEP
 from aminf.race import codec
 from aminf.race.codec import CMD, DEV_LOCAL, DEV_RELAY, FIELDS
@@ -84,6 +83,7 @@ class RaceMouse(Mouse):
     TIMEOUT = 1.5           # seconds to wait for a direct reply
     RELAY_TIMEOUT = 3.0     # ... for one relayed through the dongle
     ACK_TIMEOUT = 0.6       # ... for the acknowledgement of a write
+    PROBE_TIMEOUT = 1.0     # ... for the "are you there" check after a silence
     VERIFY_DELAY = 0.1      # between read-backs after a write
     VERIFY_TRIES = 3
     POLL = 0.02             # between polls while the device is still busy
@@ -96,7 +96,6 @@ class RaceMouse(Mouse):
         self.offline = False
         # Mouse settings travel through the dongle's relay when on 2.4G.
         self.target = DEV_RELAY if has_dongle else DEV_LOCAL
-        self.mouse_id = self.target          # 2.2.0 name, used by `raw`
         self._reader = codec.FrameReader()
         self._probed = False
 
@@ -202,8 +201,8 @@ class RaceMouse(Mouse):
             return p
         if self._probed:
             return None
-        alive = cmd != CMD["getProfile"] and \
-            self.request(CMD["getProfile"], b"", DEV_RELAY) is not None
+        alive = cmd != CMD["getProfile"] and self.request(
+            CMD["getProfile"], b"", DEV_RELAY, self.PROBE_TIMEOUT) is not None
         if not alive:
             self.offline = True
             raise MouseOffline("mouse is off or out of range")
@@ -261,7 +260,7 @@ class RaceMouse(Mouse):
     # -- basics --------------------------------------------------------------
 
     def battery(self):
-        p = self.request(CMD["getBattery"])
+        p = self._read(CMD["getBattery"])
         return codec.parse_battery(p) if p else None
 
     def hub_battery(self):
@@ -798,50 +797,47 @@ class RaceMouse(Mouse):
         self._confirm("dongle light", data, read_back)
         done = {k: changes[k] for k in changes}
         if "colour" in done:
-            done["colour"] = hue_to_hex(cfg["hue1"])
+            # The dongle stores hue and saturation, not RGB: report what the
+            # colour became.
+            done.update(colour=hue_to_hex(cfg["hue1"]), hue1=cfg["hue1"],
+                        sat1=cfg["sat1"])
         return done
 
-    # -- 2.2.0 method names --------------------------------------------------
+    # -- what 2.2.0 printed ---------------------------------------------------
     #
-    # What the command line called before sections existed. Kept so the
-    # existing commands keep working unchanged; Task 7 moves the command line
-    # onto read()/write() and removes these.
+    # `status` and `light status` keep the exact keys 2.2.0 gave them (effect
+    # as a number, the dongle's hue and saturation) and send the same reads,
+    # so scripts and status bars built on them keep working.
 
-    REMAP_KEY_ID = {"forward": 4, "back": 5}
-    REMAP_KEYBOARD = 6
-    _FLAG_FIELDS = {"setMotionSync": "motion_sync",
-                    "setAngleSnapping": "angle_snap",
-                    "setRippleControl": "ripple", "setFpsMode": "fps_mode"}
+    def status_2_2(self):
+        def quiet(read):
+            # A mouse that is asleep is reported once, not once per line.
+            try:
+                return read()
+            except MouseOffline:
+                return None
+        return {
+            "model": self.model.name,
+            "connection": self.connection,
+            "battery": quiet(self.battery),
+            "hub_battery": self.hub_battery(),
+            "profile": quiet(self.profile),
+            "polling_rate": quiet(lambda: self.get("polling_rate")),
+            "lod": quiet(lambda: self.get("lod")),
+            "motion_sync": quiet(lambda: self.get("motion_sync")),
+            "angle_snapping": quiet(lambda: self.get("angle_snap")),
+            "ripple_control": quiet(lambda: self.get("ripple")),
+            "mouse_light": quiet(self._mouse_light_raw),
+            "mouse_colour": quiet(self._mouse_colour),
+            "dongle_light": self._dongle_light_raw(),
+            "mouse_offline": self.offline,
+        }
 
-    def polling_rate(self):
-        return self.get("polling_rate")
-
-    def mouse_light(self):
-        return self._mouse_light_raw()
-
-    def mouse_colour(self):
-        return self._mouse_colour()
-
-    def dongle_light(self):
-        return self._dongle_light_raw()
-
-    def set_dongle_light(self, **changes):
-        return self.write("dongle_light", changes)
-
-    def set_mouse_light(self, **changes):
-        return self.write("light", changes)
-
-    def set_mouse_colour(self, colour):
-        return self.write("light", {"colour": colour})
-
-    def set_polling_rate(self, hz):
-        return self.write("sensor", {"polling_rate": hz})
-
-    def set_flag(self, key, value):
-        return self.write("sensor", {self._FLAG_FIELDS[key]: bool(value)})
-
-    def set_lod(self, value):
-        return self.write("sensor", {"lod": value})
+    def light_status_2_2(self, dongle):
+        if dongle:
+            return self._dongle_light_raw()
+        raw = self._mouse_light_raw()
+        return None if raw is None else dict(raw, colour=self._mouse_colour())
 
     def send(self, cmd_id, data=(), device_id=None):
         """`aminf raw`: one read command, never a write."""
@@ -849,52 +845,3 @@ class RaceMouse(Mouse):
             codec.frame(DEV_LOCAL, cmd_id)        # raises Refused if unknown
             raise Refused(f"refusing command {cmd_id}: raw only sends reads")
         return self.request(cmd_id, bytes(data), device_id)
-
-    def key_remap(self, button):
-        """(type, params) for a side button, or None."""
-        key_id = self.REMAP_KEY_ID[button]
-        p = self._read(CMD["getKeyRemap"], bytes([key_id]))
-        got = codec.parse_key(p) if p else None
-        if not got or got[0] != key_id:
-            return None
-        return got[1], list(got[2])
-
-    def remap_label(self, button):
-        if self.dry_run:
-            return "unknown (dry run)"
-        got = self.key_remap(button)
-        if not got:
-            return "no reply"
-        kind, params = got
-        if kind == self.REMAP_KEY_ID[button]:
-            return f"{button} (default)"
-        if kind == self.REMAP_KEYBOARD and len(params) >= 4:
-            consumer = params[0] | (params[1] << 8)
-            if consumer:
-                return f"media key 0x{consumer:04X}"
-            mods = [n for i, n in enumerate(MODIFIER_NAMES)
-                    if params[3] & (1 << i)]
-            return key_name(params[2], mods)
-        other = {0: "disabled", 1: "left click", 2: "right click",
-                 3: "middle click", 4: "forward", 5: "back"}
-        return other.get(kind, f"function type {kind}")
-
-    def set_key_remap(self, button, usage):
-        """usage None gives the button its own function back."""
-        key_id = self.REMAP_KEY_ID[button]
-        data = ([key_id, key_id] if usage is None
-                else [key_id, self.REMAP_KEYBOARD, 0, 0, usage, 0])
-        self._write(CMD["setKeyRemap"], bytes(data), what=f"the {button} mapping")
-        if self.dry_run:
-            return
-        want = data[2:]
-
-        def matches():
-            got = self.key_remap(button)
-            return bool(got and got[0] == data[1] and
-                        (got[1] + [0] * len(want))[:len(want)] == want)
-        try:
-            self._confirm(button, True, matches)
-        except NotConfirmed:
-            raise AmError(f"{button}: the mouse didn't confirm the new "
-                          f"mapping") from None
