@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+index-*.js
+bundle-split/
+*.pyz
+dist/
+build/
+*.egg-info/

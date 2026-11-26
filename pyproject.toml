@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aminf"
+description = "Command-line control for Angry Miao AM Infinity mice (.97, .100, .100R2)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = ["hidapi"]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+aminf = "aminf.cli:main"
+
+[tool.setuptools]
+packages = ["aminf"]
+
+[tool.setuptools.dynamic]
+version = { attr = "aminf.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

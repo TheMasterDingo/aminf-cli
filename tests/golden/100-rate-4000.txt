@@ -1,0 +1,2 @@
+  would read the parameter block from the mouse and write it back with byte 9 = 0x82
+polling rate -> 4000 Hz

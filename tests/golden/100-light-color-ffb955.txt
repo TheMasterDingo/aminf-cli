@@ -1,0 +1,2 @@
+  would send to dongle 08 01 00 04 07 ff b9 55 de
+dongle colour -> #FFB955
