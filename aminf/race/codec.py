@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from aminf.actions import Action
 from aminf.errors import AmError, Refused
 
 REPORT_ID = 0x14
@@ -338,3 +339,63 @@ def sleep_record_r2(current16, sleep_24g, sleep_bt):
         if value is not None:
             rec[off:off + 6] = _thirds(value)
     return u16(NV_SLEEP_R2) + bytes(rec)
+
+
+# ------------------------------------------------------------------ buttons
+#
+# setKeyRemap [key id][type][params...]; getKeyRemap [key id] ->
+# [status][key id][type][params...]. Key ids are 1-based in the order of
+# Model.buttons. A button's own function is the type equal to its key id,
+# except the wheel directions (12, 13).
+
+_MOUSE_TYPE = {"left": 1, "right": 2, "middle": 3, "forward": 4, "back": 5,
+               "wheel-up": 12, "wheel-down": 13}
+_MOUSE_NAME = {v: k for k, v in _MOUSE_TYPE.items()}
+_DPI_CODE = {"up": 0, "down": 1, "cycle": 3}        # 2 is "lock", not offered
+_DPI_NAME = {v: k for k, v in _DPI_CODE.items()}
+T_DISABLED, T_KEYBOARD, T_DPI, T_LAYER = 0, 6, 11, 14
+_MOD_BITS = {"ctrl": 1, "shift": 2, "alt": 4, "win": 8}
+
+
+def encode_action(action):
+    """(type, params) for setKeyRemap."""
+    k = action.kind
+    if k == "disabled":
+        return T_DISABLED, b""
+    if k == "mouse":
+        return _MOUSE_TYPE[action.value], b""
+    if k == "key":
+        bits = sum(_MOD_BITS[m] for m in action.mods)
+        return T_KEYBOARD, bytes([0, 0, action.value & 0xFF, bits])
+    if k == "media":
+        return T_KEYBOARD, u16(action.value) + b"\x00\x00"
+    if k == "dpi":
+        return T_DPI, bytes([_DPI_CODE[action.value], 0, 0])
+    if k == "profile-switch":
+        return T_LAYER, b""
+    raise AmError("a macro or other opaque binding cannot be written")
+
+
+def decode_action(kind, params):
+    """The Action a key-map entry stands for. Anything this tool does not
+    write itself (macros, rapid fire, report-rate switch, DPI lock, types
+    nobody has identified) comes back as an opaque Action, so one unusual
+    button never breaks a read."""
+    params = bytes(params)
+    if kind == T_DISABLED:
+        return Action("disabled")
+    if kind in _MOUSE_NAME:
+        return Action("mouse", _MOUSE_NAME[kind])
+    if kind == T_KEYBOARD and len(params) >= 3:
+        consumer = params[0] | (params[1] << 8)
+        if consumer:
+            return Action("media", consumer)
+        if 0x04 <= params[2] <= 0xE7:
+            bits = params[3] if len(params) > 3 else 0
+            return Action("key", params[2],
+                          tuple(m for m, b in _MOD_BITS.items() if bits & b))
+    if kind == T_DPI and params and params[0] in _DPI_NAME:
+        return Action("dpi", _DPI_NAME[params[0]])
+    if kind == T_LAYER:
+        return Action("profile-switch")
+    return Action("opaque", bytes([kind & 0xFF]) + params)

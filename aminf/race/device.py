@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import time
 
+from aminf.actions import (BUTTON_NAMES, check_left_click, format_action,
+                           parse_action)
 from aminf.colour import hex_to_hue_sat, hex_to_rgb, hue_to_hex, rgb_to_hex
 from aminf.device import Mouse
 from aminf.errors import (AmError, DeviceBusy, DeviceNotFound, MouseOffline,
-                          NotConfirmed, NotInFirmware, Refused)
+                          NotConfirmed, NotInFirmware, Refused, Unsupported)
 from aminf.keys import MODIFIER_NAMES, key_name
 from aminf.models import DPI_MIN, DPI_STEP
 from aminf.race import codec
@@ -296,6 +298,8 @@ class RaceMouse(Mouse):
             return self._read_power()
         if section == "dpi":
             return self._read_dpi()
+        if section == "buttons":
+            return self._read_buttons()
         if section == "light":
             return self._read_light()
         if section == "dongle_light":
@@ -309,6 +313,8 @@ class RaceMouse(Mouse):
             return self._write_power(dict(changes), strict)
         if section == "dpi":
             return self._write_dpi(dict(changes), strict)
+        if section == "buttons":
+            return self._write_buttons(dict(changes))
         if section == "light":
             return self._write_light(dict(changes))
         if section == "dongle_light":
@@ -570,6 +576,71 @@ class RaceMouse(Mouse):
             self._need("dpi_button", "DPI button")
             done["button"] = self.set_verified("dpi_button", changes["button"],
                                                "DPI button")
+        return done
+
+    # buttons ..............................................................
+
+    def _button_action(self, button):
+        """What a button does now, or None when the firmware has no such
+        button (older .100R2 firmware has no key 8)."""
+        key_id = self.model.buttons.index(button) + 1
+        p = self._read(CMD["getKeyRemap"], bytes([key_id]))
+        got = codec.parse_key(p) if p else None
+        if not got or got[0] != key_id:
+            return None
+        return codec.decode_action(got[1], got[2])
+
+    def _button_actions(self):
+        out = {}
+        for button in self.model.buttons:
+            action = self._button_action(button)
+            if action is not None:
+                out[button] = action
+        return out
+
+    def _read_buttons(self):
+        return {b: format_action(a) for b, a in self._button_actions().items()}
+
+    def _write_buttons(self, changes):
+        wanted = {}
+        for button, text in changes.items():
+            if button not in self.model.buttons:
+                if button in BUTTON_NAMES:
+                    raise Unsupported(f"the {self.model.name} has no "
+                                      f"'{button}' button")
+                raise AmError(f"unknown button '{button}' -- use one of "
+                              f"{', '.join(self.model.buttons)}")
+            action = parse_action(text)
+            if action is None:
+                action = self.model.default_action(button)
+            if action.kind == "opaque":
+                raise AmError(f"{button}: a macro or other opaque binding "
+                              f"cannot be written")
+            if action.kind == "profile-switch" and not self.model.layer_switch:
+                raise Unsupported(f"the {self.model.name} has no "
+                                  f"profile-switch action")
+            wanted[button] = action
+
+        if self.dry_run:
+            current = {b: self.model.default_action(b)
+                       for b in self.model.buttons}
+        else:
+            current = self._button_actions()
+            for button in wanted:
+                if button not in current:
+                    raise NotInFirmware(f"the '{button}' button is not "
+                                        f"supported by this firmware")
+        check_left_click({**current, **wanted})
+
+        done = {}
+        for button, action in wanted.items():
+            key_id = self.model.buttons.index(button) + 1
+            kind, params = codec.encode_action(action)
+            self._write(CMD["setKeyRemap"], bytes([key_id, kind]) + params,
+                        what=f"the {button} mapping")
+            self._confirm(f"{button} button", action,
+                          lambda b=button: self._button_action(b))
+            done[button] = format_action(action)
         return done
 
     # mouse light ............................................................
