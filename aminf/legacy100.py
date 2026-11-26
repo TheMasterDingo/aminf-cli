@@ -9,6 +9,7 @@ import time
 from aminf.colour import hex_to_rgb
 from aminf.errors import AmError, DeviceBusy, DeviceNotFound, MouseOffline
 from aminf.legacy97 import MODIFIER_NAMES, key_name
+from aminf.models import MODELS
 
 
 def rgb_hex(b):
@@ -245,7 +246,7 @@ class Am100:
     relay) and the mouse over USB (mouse settings directly).
     """
 
-    model = ".100"
+    model = MODELS["100"]
 
     def __init__(self, dongle=None, mouse=None, dry_run=False):
         self.dongle = dongle
@@ -256,6 +257,10 @@ class Am100:
     @property
     def has_dongle(self):
         return self.dongle is not None or self.dry_run
+
+    @property
+    def connection(self):
+        return "dongle" if self.has_dongle else "usb"
 
     # -- discovery ---------------------------------------------------------
 

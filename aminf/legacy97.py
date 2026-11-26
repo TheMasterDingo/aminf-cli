@@ -8,6 +8,7 @@ import time
 
 from aminf.colour import hex_to_rgb
 from aminf.errors import AmError, DeviceBusy, DeviceNotFound
+from aminf.models import MODELS
 
 
 # =================================================================== .97
@@ -142,12 +143,12 @@ def key_name(usage, modifiers=()):
 # --------------------------------------------------------------- the device
 
 class Am97:
-    """Vendor HID client for the AM Infinity .97."""
+    """Vendor HID client for the AM Infinity .97 and, for now, the .100R2,
+    which speaks the same protocol."""
 
-    model = ".97"
-
-    def __init__(self, backend, path, has_dongle, dry_run=False):
+    def __init__(self, backend, path, has_dongle, dry_run=False, model=None):
         self.backend = backend
+        self.model = model or MODELS["97"]
         self.has_dongle = has_dongle
         self.dry_run = dry_run
         # Mouse-side settings travel over the relay only via the dongle.
@@ -167,21 +168,22 @@ class Am97:
     # -- discovery ---------------------------------------------------------
 
     @staticmethod
-    def discover(backend, prefer="auto"):
+    def discover(backend, prefer="auto", model=None):
         """Return (path, has_dongle) or None.
 
         prefer: 'auto' (dongle first), 'dongle', or 'usb'. The dongle is
         preferred because it owns the dongle lighting and can still reach the
         mouse by relay, so it can service every command on its own.
         """
+        model = model or MODELS["97"]
         dongle = usb = None
         for d in backend.enumerate():
             if d.usage_page != USAGE_PAGE:
                 continue
             ids = (d.vendor_id, d.product_id)
-            if ids == (VID, PID_DONGLE):
+            if ids in model.dongle_ids:
                 dongle = (d.path, True)
-            elif ids == (VID, PID_MOUSE) or ids in ALT_IDS:
+            elif ids in model.usb_ids:
                 usb = (d.path, False)
         if prefer == "dongle":
             return dongle
@@ -190,15 +192,20 @@ class Am97:
         return dongle or usb
 
     @classmethod
-    def open(cls, backend, prefer="auto", dry_run=False):
-        found = cls.discover(backend, prefer)
+    def open(cls, backend, prefer="auto", dry_run=False, model=None):
+        model = model or MODELS["97"]
+        found = cls.discover(backend, prefer, model)
         if not found:
             if dry_run:
-                return cls(backend, None, True, dry_run=True)
+                return cls(backend, None, True, dry_run=True, model=model)
             raise DeviceNotFound(
-                "AM Infinity .97 not found. Plug in the 2.4G dongle or "
-                "connect the mouse by cable.")
-        return cls(backend, *found, dry_run=dry_run)
+                f"AM Infinity {model.name} not found. Plug in the 2.4G "
+                f"dongle or connect the mouse by cable.")
+        return cls(backend, *found, dry_run=dry_run, model=model)
+
+    @property
+    def connection(self):
+        return "dongle" if self.has_dongle else "usb"
 
     def close(self):
         if self.dev:

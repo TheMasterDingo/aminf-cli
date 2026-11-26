@@ -7,10 +7,11 @@ import sys
 
 from aminf import __version__
 from aminf.colour import hex_to_hue_sat, hue_to_hex
-from aminf.errors import AmError, DeviceNotFound, Unsupported
+from aminf.discover import open_mice
+from aminf.errors import AmError, Unsupported
 from aminf.legacy97 import (DONGLE_EFFECTS, MOUSE_EFFECTS, REMAP_KEY_ID,
-                            VALID_RATES, Am97, key_name, parse_remap_key)
-from aminf.legacy100 import Am100
+                            VALID_RATES, key_name, parse_remap_key)
+from aminf.models import MODELS
 from aminf.transport import HidapiBackend
 
 
@@ -30,10 +31,10 @@ ONLY_97_LIGHT = {"brightness", "speed", "effect"}
 
 
 def collect_status(m):
-    if m.model == ".100":
+    if m.model.family == "m100":
         params = None if m.dry_run else m._params_or_none()
         return {
-            "model": m.model,
+            "model": m.model.name,
             "connection": "dongle" if m.dongle else "usb",
             "battery": m.battery(),
             "hub_battery": m.hub_battery(),
@@ -44,7 +45,7 @@ def collect_status(m):
             "mouse_offline": m.offline,
         }
     return {
-        "model": m.model,
+        "model": m.model.name,
         "connection": "dongle" if m.has_dongle else "usb",
         "battery": m.battery(),
         "hub_battery": m.hub_battery(),
@@ -113,11 +114,11 @@ def print_status(s):
 def build_parser():
     ap = argparse.ArgumentParser(
         prog="aminf",
-        description="Control Angry Miao AM Infinity mice (.97 and .100) "
+        description="Control Angry Miao AM Infinity mice (.97, .100, .100R2) "
                     "from the command line.")
     ap.add_argument("--version", action="version",
                     version=f"%(prog)s {__version__}")
-    ap.add_argument("--mouse", choices=["auto", "97", "100"], default="auto",
+    ap.add_argument("--mouse", choices=["auto", *MODELS], default="auto",
                     help="which mouse to talk to (default: every one found)")
     ap.add_argument("--device", choices=["auto", "dongle", "usb"],
                     default="auto", help="which endpoint to talk to")
@@ -182,7 +183,7 @@ def light_state(cur, action):
 def run_command(m, args, say):
     """Run one command on one mouse. Returns data for --json status."""
     c = args.cmd
-    is100 = m.model == ".100"
+    is100 = m.model.family == "m100"
     if is100 and (c in ONLY_97 or
                   (c == "light" and args.action in ONLY_97_LIGHT) or
                   (c == "mouse-light" and args.action in ("color", "colour"))):
@@ -208,7 +209,7 @@ def run_command(m, args, say):
                 raise AmError("no reply")
             if dongle is False and not is100:
                 cur = dict(cur, colour=m.mouse_colour())
-            print(json.dumps(dict(cur, model=m.model), indent=2))
+            print(json.dumps(dict(cur, model=m.model.name), indent=2))
         elif a in ("on", "off", "toggle"):
             if dongle and not m.has_dongle:
                 raise AmError("dongle lighting needs the 2.4G dongle connected")
@@ -285,7 +286,7 @@ def run_command(m, args, say):
                                                                reverse=True)
             labels = {b: m.remap_label(b) for b in buttons}
             if args.json:
-                print(json.dumps(dict(labels, model=m.model), indent=2))
+                print(json.dumps(dict(labels, model=m.model.name), indent=2))
             else:
                 for b, label in labels.items():
                     print(f"{b:<8} {label}")
@@ -296,38 +297,16 @@ def run_command(m, args, say):
     return None
 
 
-def open_mice(args, backend):
-    """Every supported mouse that's connected (or just the one --mouse asks
-    for). Returns (mice, errors)."""
-    mice, errors = [], []
-    wanted = [(".97", Am97), (".100", Am100)]
-    if args.mouse != "auto":
-        wanted = [w for w in wanted if w[0] == "." + args.mouse]
-    for name, cls in wanted:
-        if args.dry_run:
-            if args.mouse != "auto" or name == ".97":
-                mice.append(cls.open(backend, prefer=args.device, dry_run=True))
-            continue
-        try:
-            mice.append(cls.open(backend, prefer=args.device))
-        except DeviceNotFound:
-            if args.mouse != "auto":
-                errors.append(f"AM Infinity {name} not found.")
-        except AmError as exc:
-            errors.append(str(exc))
-    return mice, errors
-
-
 def main(argv=None, backend=None):
     args = build_parser().parse_args(argv)
     if backend is None:
         backend = HidapiBackend()
     say_base = (lambda *a: None) if args.quiet else print
 
-    mice, errors = open_mice(args, backend)
+    mice, errors = open_mice(backend, args.mouse, args.device, args.dry_run)
     if not mice:
-        for e in errors or ["No AM Infinity .97 or .100 found. Plug in the "
-                            "2.4G dongle or connect the mouse by cable."]:
+        for e in errors or ["No AM Infinity mouse found. Plug in the 2.4G "
+                            "dongle or connect the mouse by cable."]:
             print(e, file=sys.stderr)
         return 1
 
@@ -338,7 +317,7 @@ def main(argv=None, backend=None):
         for m in mice:
             say = say_base
             if several and not args.quiet and not args.json:
-                print(f"--- {m.model}")
+                print(f"--- {m.model.name}")
             try:
                 out = run_command(m, args, say)
                 if out is not None:
@@ -347,10 +326,10 @@ def main(argv=None, backend=None):
                 say(str(exc))
             except AmError as exc:
                 failed = True
-                print(f"{m.model}: {exc}", file=sys.stderr)
+                print(f"{m.model.name}: {exc}", file=sys.stderr)
             except Exception as exc:                         # pragma: no cover
                 failed = True
-                print(f"{m.model}: {args.cmd} failed: {exc}", file=sys.stderr)
+                print(f"{m.model.name}: {args.cmd} failed: {exc}", file=sys.stderr)
     finally:
         for m in mice:
             m.close()
