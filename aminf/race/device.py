@@ -13,6 +13,7 @@ from aminf.device import Mouse
 from aminf.errors import (AmError, DeviceBusy, DeviceNotFound, MouseOffline,
                           NotConfirmed, NotInFirmware, Refused)
 from aminf.keys import MODIFIER_NAMES, key_name
+from aminf.models import DPI_MIN, DPI_STEP
 from aminf.race import codec
 from aminf.race.codec import CMD, DEV_LOCAL, DEV_RELAY, FIELDS
 
@@ -293,6 +294,8 @@ class RaceMouse(Mouse):
             return self._read_sensor()
         if section == "power":
             return self._read_power()
+        if section == "dpi":
+            return self._read_dpi()
         if section == "light":
             return self._read_light()
         if section == "dongle_light":
@@ -304,6 +307,8 @@ class RaceMouse(Mouse):
             return self._write_sensor(dict(changes), strict)
         if section == "power":
             return self._write_power(dict(changes), strict)
+        if section == "dpi":
+            return self._write_dpi(dict(changes), strict)
         if section == "light":
             return self._write_light(dict(changes))
         if section == "dongle_light":
@@ -435,6 +440,136 @@ class RaceMouse(Mouse):
             for i, k in enumerate(names):
                 if k in changes:
                     done[k] = got[i]
+        return done
+
+    # dpi ..................................................................
+
+    def _dpi_raw(self):
+        p = self._read(CMD["getDpi"])
+        return codec.parse_dpi(p) if p else None
+
+    def _dpi_colour(self, stage):
+        rec = self._nv(codec.NV_DPI_COLOUR_BASE + stage)
+        if not rec or len(rec) < 7:
+            return None
+        return rgb_to_hex(rec[4], rec[5], rec[6])
+
+    def _read_dpi(self):
+        d = self._dpi_raw()
+        if d is None:
+            return None
+        out = {"stages": [{"x": x, "y": y, "colour": self._dpi_colour(i)}
+                          for i, (x, y) in enumerate(zip(d["x"], d["y"]))],
+               "count": d["count"], "active": d["active"]}
+        button = self.get("dpi_button")
+        if button is not None:
+            out["button"] = button
+        return out
+
+    def _dpi_value(self, axis, v, strict):
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise AmError(f"DPI {axis} must be a number, not {v!r}")
+        if strict:
+            if not DPI_MIN <= v <= self.model.dpi_max or v % DPI_STEP:
+                raise AmError(f"DPI {axis} must be {DPI_MIN}-"
+                              f"{self.model.dpi_max} in steps of {DPI_STEP}")
+        elif not 1 <= v <= U16_MAX:
+            raise AmError(f"DPI {axis} must be 1-{U16_MAX}")
+        return v
+
+    def _write_dpi(self, changes, strict):
+        self._check_keys("dpi", changes, ("stages", "count", "active", "button"))
+        n_stages = codec.DPI_STAGES
+        stages = {}
+        for key, ch in (changes.get("stages") or {}).items():
+            try:
+                i = int(key)
+            except (TypeError, ValueError):
+                i = -1
+            if not 0 <= i < n_stages:
+                raise AmError(f"DPI stage must be 1-{n_stages}")
+            self._check_keys(f"dpi stage {i + 1}", ch, ("x", "y", "colour"))
+            st = {a: self._dpi_value(a, ch[a], strict) for a in ("x", "y")
+                  if a in ch}
+            if ch.get("colour") is not None:
+                st["rgb"] = hex_to_rgb(ch["colour"])
+            if st:
+                stages[i] = st
+        if "count" in changes:
+            _int_in("DPI stage count", changes["count"], 1, n_stages)
+        if "button" in changes:
+            _flag_in("DPI button", changes["button"])
+
+        cur = None
+        if not self.dry_run:
+            cur = self._dpi_raw()
+            if cur is None:
+                raise AmError("could not read the DPI settings -- nothing "
+                              "written")
+        count = changes.get("count", cur["count"] if cur else n_stages)
+        if "active" in changes:
+            _int_in("active DPI stage", changes["active"], 0, count - 1)
+            active = changes["active"]
+        else:
+            active = min(cur["active"], count - 1) if cur else 0
+
+        # Values first, the way the configurator orders it.
+        done_stages, wanted_xy, wanted_colour = {}, {}, {}
+        for i, st in sorted(stages.items()):
+            if "x" in st or "y" in st:
+                x = st.get("x", cur["x"][i] if cur and "y" in st else st.get("y"))
+                y = st.get("y", x)
+                self._write(CMD["setDpi"], codec.set_dpi_stage(i, x, y),
+                            what=f"DPI stage {i + 1} ({x}, {y})")
+                wanted_xy[i] = (x, y)
+                if cur and i == cur["active"] and "count" not in changes \
+                        and "active" not in changes:
+                    # The sensor keeps using the old value until the stage
+                    # is selected again.
+                    self._write(CMD["setCurrentDpiStage"], bytes([i]),
+                                what="the active DPI stage")
+            if "rgb" in st:
+                self._write(CMD["saveRgb"], codec.save_dpi_colour(i, st["rgb"]),
+                            what=f"the colour of DPI stage {i + 1}")
+                wanted_colour[i] = rgb_to_hex(*st["rgb"])
+        if "count" in changes:
+            self._write(CMD["setDpiLoopRange"], bytes([count]),
+                        what="the DPI stage count")
+        if "count" in changes or "active" in changes:
+            self._write(CMD["setCurrentDpiStage"], bytes([active]),
+                        what="the active DPI stage")
+
+        done = {}
+        if wanted_xy or "count" in changes or "active" in changes:
+            def state():
+                d = self._dpi_raw()
+                if d is None:
+                    return None
+                return ({i: (d["x"][i], d["y"][i]) for i in wanted_xy},
+                        d["count"] if "count" in changes else None,
+                        d["active"] if "count" in changes or "active" in changes
+                        else None)
+            self._confirm("DPI", (wanted_xy,
+                                  count if "count" in changes else None,
+                                  active if "count" in changes or "active" in changes
+                                  else None), state)
+            for i, (x, y) in wanted_xy.items():
+                done_stages.setdefault(i, {}).update(x=x, y=y)
+            if "count" in changes:
+                done["count"] = count
+            if "active" in changes or ("count" in changes and cur
+                                       and active != cur["active"]):
+                done["active"] = active
+        for i, colour in wanted_colour.items():
+            self._confirm(f"colour of DPI stage {i + 1}", colour,
+                          lambda i=i: self._dpi_colour(i))
+            done_stages.setdefault(i, {})["colour"] = colour
+        if done_stages:
+            done["stages"] = done_stages
+        if "button" in changes:
+            self._need("dpi_button", "DPI button")
+            done["button"] = self.set_verified("dpi_button", changes["button"],
+                                               "DPI button")
         return done
 
     # mouse light ............................................................
