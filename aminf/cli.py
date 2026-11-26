@@ -8,10 +8,12 @@ import sys
 from aminf import __version__
 from aminf.colour import hex_to_hue_sat, hue_to_hex
 from aminf.discover import open_mice
-from aminf.errors import AmError, Unsupported
-from aminf.legacy97 import (DONGLE_EFFECTS, MOUSE_EFFECTS, REMAP_KEY_ID,
-                            VALID_RATES, key_name, parse_remap_key)
+from aminf.errors import AmError, MouseOffline, Unsupported
+from aminf.keys import key_name, parse_remap_key
 from aminf.models import MODELS
+from aminf.race.device import DONGLE_EFFECTS, MOUSE_EFFECTS, VALID_RATES, RaceMouse
+
+REMAP_KEY_ID = RaceMouse.REMAP_KEY_ID
 from aminf.transport import HidapiBackend
 
 
@@ -44,20 +46,28 @@ def collect_status(m):
             "dongle_light": m.dongle_light(),
             "mouse_offline": m.offline,
         }
+    def quiet(read):
+        # A mouse that is asleep is reported once, not once per line.
+        try:
+            return read()
+        except MouseOffline:
+            return None
+
     return {
         "model": m.model.name,
         "connection": "dongle" if m.has_dongle else "usb",
-        "battery": m.battery(),
+        "battery": quiet(m.battery),
         "hub_battery": m.hub_battery(),
-        "profile": m.profile(),
-        "polling_rate": m.polling_rate(),
-        "lod": m._byte("getLod"),
-        "motion_sync": m._flag("getMotionSync"),
-        "angle_snapping": m._flag("getAngleSnapping"),
-        "ripple_control": m._flag("getRippleControl"),
-        "mouse_light": m.mouse_light(),
-        "mouse_colour": m.mouse_colour(),
+        "profile": quiet(m.profile),
+        "polling_rate": quiet(m.polling_rate),
+        "lod": quiet(lambda: m.get("lod")),
+        "motion_sync": quiet(lambda: m.get("motion_sync")),
+        "angle_snapping": quiet(lambda: m.get("angle_snap")),
+        "ripple_control": quiet(lambda: m.get("ripple")),
+        "mouse_light": quiet(m.mouse_light),
+        "mouse_colour": quiet(m.mouse_colour),
         "dongle_light": m.dongle_light(),
+        "mouse_offline": m.offline,
     }
 
 
@@ -94,6 +104,8 @@ def print_status(s):
             print(line)
         return
 
+    if s.get("mouse_offline"):
+        print("mouse          off or out of range (dongle values only)")
     print(f"lift-off dist  {s['lod']}")
     print(f"sensor         motion-sync={s['motion_sync']}  "
           f"angle-snap={s['angle_snapping']}  ripple={s['ripple_control']}")

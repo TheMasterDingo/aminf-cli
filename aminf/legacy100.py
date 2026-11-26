@@ -8,7 +8,7 @@ import time
 
 from aminf.colour import hex_to_rgb
 from aminf.errors import AmError, DeviceBusy, DeviceNotFound, MouseOffline
-from aminf.legacy97 import MODIFIER_NAMES, key_name
+from aminf.keys import MODIFIER_NAMES, key_name
 from aminf.models import MODELS
 
 

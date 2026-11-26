@@ -21,6 +21,9 @@ class Model:
     profiles: int                # onboard profiles (0-based on the CLI)
     lod_max: int                 # lift-off distance runs 0..lod_max
     dpi_max: int                 # the configurator's ceiling, in DPI
+    hw_debounce: bool = False    # reports hardware debounce (read-only)
+    sleep_nv_on_cable: bool = False   # cabled: sleep lives in an NV record
+    profile_to_dongle: bool = False   # receiver keeps its own active profile
 
 
 MODELS = {m.key: m for m in (
@@ -32,7 +35,8 @@ MODELS = {m.key: m for m in (
           usb_ids=((0x0E8D, 0x0881),),
           dongle_ids=((0x0E8D, 0x0704),),
           buttons=BUTTONS_7 + ("bottom",), profiles=3, lod_max=4,
-          dpi_max=30000),
+          dpi_max=30000, hw_debounce=True, sleep_nv_on_cable=True,
+          profile_to_dongle=True),
     Model(".100", "100", "m100",
           usb_ids=((0x3151, 0x402A),),
           dongle_ids=((0x3151, 0x5007),),

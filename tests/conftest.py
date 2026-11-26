@@ -39,3 +39,34 @@ def write_tmp(tmp_path):
         p.write_text(json.dumps(doc), encoding="utf-8")
         return str(p)
     return _write
+
+
+@pytest.fixture(autouse=True)
+def fast_timing(monkeypatch):
+    """Simulated mice answer at once; don't wait like real hardware."""
+    try:
+        from aminf.race.device import RaceMouse
+    except ImportError:
+        return
+    monkeypatch.setattr(RaceMouse, "TIMEOUT", 0.02)
+    monkeypatch.setattr(RaceMouse, "RELAY_TIMEOUT", 0.02)
+    monkeypatch.setattr(RaceMouse, "ACK_TIMEOUT", 0.02)
+    monkeypatch.setattr(RaceMouse, "VERIFY_DELAY", 0.0)
+    monkeypatch.setattr(RaceMouse, "POLL", 0.0)
+
+
+@pytest.fixture
+def r2():
+    """(mouse, fake): a .100R2 on its dongle, as captured from the owner's."""
+    from aminf.discover import open_mice
+    from tests.fakes import FakeRace
+    fake = FakeRace(load("100r2-dongle"), "100r2", dongle=True)
+    mouse = open_mice(fake)[0][0]
+    yield mouse, fake
+    mouse.close()
+
+
+@pytest.fixture
+def r2fake():
+    from tests.fakes import FakeRace
+    return FakeRace(load("100r2-dongle"), "100r2", dongle=True)

@@ -2,20 +2,20 @@
 from __future__ import annotations
 
 from aminf.errors import AmError, DeviceNotFound
-from aminf.legacy97 import Am97
 from aminf.legacy100 import Am100
 from aminf.models import MODELS
+from aminf.race.device import RaceMouse
 
 
 def _open(model, backend, prefer, dry_run):
     if model.family == "race":
-        return Am97.open(backend, prefer=prefer, dry_run=dry_run, model=model)
+        return RaceMouse.open(backend, model, prefer=prefer, dry_run=dry_run)
     return Am100.open(backend, prefer=prefer, dry_run=dry_run)
 
 
 def _present(model, backend, prefer):
     if model.family == "race":
-        return Am97.discover(backend, prefer, model) is not None
+        return RaceMouse.discover(backend, model, prefer) is not None
     return Am100.present(backend, prefer)
 
 
