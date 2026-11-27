@@ -208,3 +208,38 @@ def test_no_dongle_light_on_cable():
     assert mouse.read("dongle_light") is None
     with pytest.raises(AmError, match="dongle"):
         mouse.write("dongle_light", {"on": False})
+
+
+# A write changes only what was asked for, even when the mouse holds values
+# the configurator's own sliders could not produce (found by tools/hwtest.py
+# on the simulated .100R2, whose factory light speed is 0).
+
+def test_light_switch_keeps_a_speed_the_ui_cannot_set(r2):
+    assert r2[0].read("light")["speed"] == 0
+    r2[0].write("light", {"on": False})
+    assert r2[1].sent_data(12467) == bytes([0, 0, 0])
+    r2[0].write("light", {"on": True})
+    assert r2[0].read("light") == {"on": True, "effect": "solid", "speed": 0, "colour": "#FFFFFF"}
+
+
+def test_light_speed_range_is_strict_only_on_the_command_line(r2):
+    with pytest.raises(AmError, match="1-10"):
+        r2[0].write("light", {"speed": 0})
+    r2[0].write("light", {"speed": 5})
+    assert r2[0].write("light", {"speed": 0}, strict=False) == {"speed": 0}
+
+
+def test_dongle_light_switch_keeps_every_other_byte(r2):
+    odd = bytes.fromhex("00010059000001000001004000")      # sat 0, speed below 81, brightness 0
+    r2[1].replies["local/12302:"] = odd
+    r2[0].write("dongle_light", {"on": True})
+    assert r2[1].sent_data(12301) == b"\x01" + odd[1:]
+
+
+def test_dongle_light_values_from_the_command_line_are_checked(r2):
+    with pytest.raises(AmError):
+        r2[0].write("dongle_light", {"speed": 40})
+    with pytest.raises(AmError):
+        r2[0].write("dongle_light", {"brightness": 0})
+    assert r2[0].write("dongle_light", {"speed": 20, "brightness": 255}) == {"speed": 20, "brightness": 255}
+    assert r2[1].sent_data(12301)[11:13] == bytes([100, 255])

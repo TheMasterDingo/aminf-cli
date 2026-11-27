@@ -315,9 +315,9 @@ class RaceMouse(Mouse):
         if section == "buttons":
             return self._write_buttons(dict(changes))
         if section == "light":
-            return self._write_light(dict(changes))
+            return self._write_light(dict(changes), strict)
         if section == "dongle_light":
-            return self._write_dongle_light(dict(changes))
+            return self._write_dongle_light(dict(changes), strict)
         raise AmError(f"unknown section '{section}'")
 
     @staticmethod
@@ -643,11 +643,22 @@ class RaceMouse(Mouse):
         return done
 
     # mouse light ............................................................
+    #
+    # Lighting has no "set just this field" command: the firmware takes the
+    # whole block or nothing. Every change is therefore read-modify-write on
+    # the raw bytes, so a value the mouse holds that the configurator's own
+    # sliders could not produce (a factory speed of 0, say) is written back
+    # exactly as it was.
+
+    def _light_block(self):
+        """The 3 raw bytes [enabled, effect, speed], or None."""
+        d = self._nv(codec.NV_LIGHT_SETTINGS)
+        return bytes(d[:3]) if d and len(d) >= 3 else None
 
     def _mouse_light_raw(self):
-        """{on, effect (number), speed} from the light-settings record."""
-        d = self._nv(codec.NV_LIGHT_SETTINGS)
-        if not d or len(d) < 3:
+        """{on, effect (number), speed} as 2.2.0 reported it."""
+        d = self._light_block()
+        if d is None:
             return None
         return {"on": bool(d[0]), "effect": d[1], "speed": d[2]}
 
@@ -669,32 +680,40 @@ class RaceMouse(Mouse):
             out["colour"] = colour
         return out
 
-    def _light_settings_bytes(self, cfg):
-        return bytes([1 if cfg["on"] else 0, cfg["effect"],
-                      max(1, min(10, cfg["speed"]))])
-
-    def _write_light(self, changes):
+    def _write_light(self, changes, strict=True):
         self._check_keys("light", changes, ("on", "effect", "speed", "colour"))
+        effect_ids = {v: k for k, v in MOUSE_EFFECTS.items()}
         if "on" in changes:
             _flag_in("light on", changes["on"])
         if "speed" in changes:
-            _int_in("light speed", changes["speed"], 1, 10)
-        if "effect" in changes:
-            names = {v: k for k, v in MOUSE_EFFECTS.items()}
-            if changes["effect"] not in names:
-                raise AmError(f"mouse light effect must be one of "
-                              f"{', '.join(names)}")
+            _int_in("light speed", changes["speed"], *((1, 10) if strict else (0, 255)))
+        if "effect" in changes and changes["effect"] not in effect_ids:
+            raise AmError(f"mouse light effect must be one of "
+                          f"{', '.join(effect_ids)}")
         rgb = hex_to_rgb(changes["colour"]) if "colour" in changes else None
+
         if self.dry_run:
-            cfg = dict(MOUSE_LIGHT_FALLBACK)
+            block = bytearray([1 if MOUSE_LIGHT_FALLBACK["on"] else 0,
+                               MOUSE_LIGHT_FALLBACK["effect"],
+                               MOUSE_LIGHT_FALLBACK["speed"]])
         else:
-            cfg = self._mouse_light_raw()
-            if cfg is None:
+            cur = self._light_block()
+            if cur is None:
                 raise AmError("no reply from the mouse light -- nothing "
                               "written")
+            block = bytearray(cur)
+        before = bytes(block)
+        if "on" in changes:
+            block[0] = 1 if changes["on"] else 0
+        if "effect" in changes:
+            block[1] = effect_ids[changes["effect"]]
+        if "speed" in changes:
+            block[2] = changes["speed"]
+
         done = {}
         if rgb is not None:
-            # The configurator's own three-step sequence for a solid colour.
+            # The configurator's own three-step sequence for a solid colour:
+            # save the pattern, show it at once, then re-send the settings.
             self._write(CMD["saveRgb"],
                         codec.u16(codec.NV_LIGHT_COLOURS) + bytes([RGB_LED_COUNT])
                         + codec.u16(3) + bytes([RGB_FRAME_INTERVAL, *rgb]),
@@ -703,35 +722,37 @@ class RaceMouse(Mouse):
                 time.sleep(self.VERIFY_DELAY)
             self._write(CMD["setRgbRealtime"],
                         bytes([RGB_REALTIME_FLAG, 0, RGB_FRAME_INTERVAL, 1, *rgb]))
-        wanted = dict(cfg)
-        for key in ("on", "speed"):
-            if key in changes:
-                wanted[key] = changes[key]
-        if "effect" in changes:
-            wanted["effect"] = {v: k for k, v in MOUSE_EFFECTS.items()}[changes["effect"]]
-        if rgb is not None or wanted != cfg or self.dry_run:
-            data = self._light_settings_bytes(wanted)
-            self._write(CMD["setLightSettings"], data)
-            sent = {"on": bool(data[0]), "effect": data[1], "speed": data[2]}
-            if any(k in changes for k in ("on", "effect", "speed")):
-                self._confirm("mouse light", sent, self._mouse_light_raw)
+        if rgb is not None or bytes(block) != before or self.dry_run:
+            self._write(CMD["setLightSettings"], bytes(block))
+            if bytes(block) != before:
+                self._confirm("mouse light", bytes(block), self._light_block)
         for key in ("on", "effect", "speed"):
             if key in changes:
                 done[key] = changes[key]
         if rgb is not None:
-            want = rgb_to_hex(*rgb)
-            done["colour"] = self._confirm("mouse light colour", want,
-                                           self._mouse_colour)
+            done["colour"] = self._confirm("mouse light colour",
+                                           rgb_to_hex(*rgb), self._mouse_colour)
         return done
 
     # dongle light ...........................................................
+    #
+    # One 13-byte block: [on][effect][hue1 hi][hue1 lo][sat1][hue2 hi]
+    # [hue2 lo][sat2][hue3 hi][hue3 lo][sat3][speed + 80][brightness].
+    # The dongle stores hue (0-1530) and saturation, not RGB.
 
-    def _dongle_light_raw(self):
-        """The 13-byte block as 2.2.0 reported it (effect as a number)."""
+    _DONGLE_HUE_AT = {"hue1": 2, "hue2": 5, "hue3": 8}
+    _DONGLE_BYTE_AT = {"sat1": 4, "sat2": 7, "sat3": 10}
+
+    def _dongle_light_block(self):
         if not self.has_dongle or self.dry_run:
             return None
         p = self.request(CMD["getDongleLight"], device_id=DEV_LOCAL)
-        if not p or len(p) < 13:
+        return bytes(p[:13]) if p and len(p) >= 13 else None
+
+    def _dongle_light_raw(self):
+        """The block as 2.2.0 reported it (effect as a number)."""
+        p = self._dongle_light_block()
+        if p is None:
             return None
         return {
             "on": bool(p[0]), "effect": p[1],
@@ -744,6 +765,7 @@ class RaceMouse(Mouse):
 
     @staticmethod
     def _dongle_light_bytes(cfg):
+        """A whole block from field values (used for the dry-run preview)."""
         h1, h2, h3 = cfg["hue1"], cfg["hue2"], cfg["hue3"]
         return bytes([
             1 if cfg["on"] else 0, cfg["effect"],
@@ -762,7 +784,7 @@ class RaceMouse(Mouse):
         return dict(raw, effect=names.get(raw["effect"], raw["effect"]),
                     colour=hue_to_hex(raw["hue1"]))
 
-    def _write_dongle_light(self, changes):
+    def _write_dongle_light(self, changes, strict=True):
         if not self.has_dongle:
             raise AmError("dongle lighting needs the 2.4G dongle connected")
         allowed = ("on", "effect", "colour", "speed", "brightness",
@@ -778,29 +800,48 @@ class RaceMouse(Mouse):
             raw["effect"] = DONGLE_EFFECTS[raw["effect"]]
         if "colour" in raw:
             raw["hue1"], raw["sat1"] = hex_to_hue_sat(raw.pop("colour"))
-        for key in raw:
-            if key not in ("on", "effect"):
-                _int_in(key, raw[key], 0, 1530 if key.startswith("hue") else 255)
+        limits = {"effect": (0, 255), "speed": (1, 20) if strict else (-80, 175),
+                  "brightness": (1, 255) if strict else (0, 255)}
+        for key, value in raw.items():
+            if key == "on":
+                continue
+            if key in self._DONGLE_HUE_AT:
+                _int_in(key, value, 0, 1530)
+            elif key in self._DONGLE_BYTE_AT:
+                _int_in(key, value, *((1, 100) if strict else (0, 255)))
+            else:
+                _int_in(f"dongle light {key}", value, *limits[key])
+
         if self.dry_run:
-            cfg = dict(DONGLE_LIGHT_FALLBACK)
+            block = bytearray(self._dongle_light_bytes(DONGLE_LIGHT_FALLBACK))
         else:
-            cfg = self._dongle_light_raw()
-            if cfg is None:
+            cur = self._dongle_light_block()
+            if cur is None:
                 raise AmError("no reply from the dongle light -- nothing "
                               "written")
-        cfg.update(raw)
-        data = self._dongle_light_bytes(cfg)
-        self._write(CMD["setDongleLight"], data, device_id=DEV_LOCAL)
-        def read_back():
-            now = self._dongle_light_raw()
-            return None if now is None else self._dongle_light_bytes(now)
-        self._confirm("dongle light", data, read_back)
-        done = {k: changes[k] for k in changes}
+            block = bytearray(cur)
+        for key, value in raw.items():
+            if key == "on":
+                block[0] = 1 if value else 0
+            elif key == "effect":
+                block[1] = value
+            elif key in self._DONGLE_HUE_AT:
+                at = self._DONGLE_HUE_AT[key]
+                block[at], block[at + 1] = (value >> 8) & 0xFF, value & 0xFF
+            elif key in self._DONGLE_BYTE_AT:
+                block[self._DONGLE_BYTE_AT[key]] = value
+            elif key == "speed":
+                block[11] = (value + 80) & 0xFF
+            elif key == "brightness":
+                block[12] = value
+        self._write(CMD["setDongleLight"], bytes(block), device_id=DEV_LOCAL)
+        self._confirm("dongle light", bytes(block), self._dongle_light_block)
+        done = dict(changes)
         if "colour" in done:
             # The dongle stores hue and saturation, not RGB: report what the
             # colour became.
-            done.update(colour=hue_to_hex(cfg["hue1"]), hue1=cfg["hue1"],
-                        sat1=cfg["sat1"])
+            done.update(colour=hue_to_hex(raw["hue1"]), hue1=raw["hue1"],
+                        sat1=raw["sat1"])
         return done
 
     # -- what 2.2.0 printed ---------------------------------------------------
