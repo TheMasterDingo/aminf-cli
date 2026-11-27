@@ -101,5 +101,6 @@ def test_hwtest_leaves_a_stage_alone_if_the_mouse_rejects_its_own_value(r2fake, 
     report = json.loads((tmp_path / "100r2-dongle.json").read_text())
     by_name = {c["check"]: c for c in report["checks"]}
     assert by_name["dpi stage 8"]["result"] == "unsupported" and "30000" in by_name["dpi stage 8"]["detail"]
+    assert by_name["dpi stage 7"]["result"] == "verified"        # the value write is still covered
     assert report["restored"] is True
     assert r2fake.replies["12485:"][17:19] == (30000).to_bytes(2, "little")     # still 30000

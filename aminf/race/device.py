@@ -480,7 +480,8 @@ class RaceMouse(Mouse):
             raise AmError(f"DPI {axis} must be a number, not {v!r}")
         if strict:
             if not DPI_MIN <= v <= self.model.dpi_max or v % DPI_STEP:
-                raise AmError(f"DPI {axis} must be {DPI_MIN}-"
+                raise AmError(f"DPI {axis} {v} is not valid: the "
+                              f"{self.model.name} takes {DPI_MIN}-"
                               f"{self.model.dpi_max} in steps of {DPI_STEP}")
         elif not 1 <= v <= U16_MAX:
             raise AmError(f"DPI {axis} must be 1-{U16_MAX}")

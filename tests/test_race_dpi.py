@@ -58,7 +58,7 @@ def test_active_must_be_inside_count(r2):
     assert not [c for c in r2[1].sent_cmds() if c in (12486, 12487)]
 
 
-@pytest.mark.parametrize("bad", [0, 49, 1625, 30050, "fast", True])
+@pytest.mark.parametrize("bad", [0, 49, 1625, 26050, 30000, "fast", True])
 def test_dpi_value_rules(r2, bad):
     with pytest.raises(AmError):
         r2[0].write("dpi", {"stages": {0: {"x": bad}}})
@@ -87,7 +87,7 @@ def test_colour_goes_to_the_pinned_nv(r2):
 def test_device_rejection_is_reported(r2):
     r2[1].reject = {12484: 0x05}
     with pytest.raises(AmError, match="rejected"):
-        r2[0].write("dpi", {"stages": {7: {"x": 30000, "y": 1000}}})
+        r2[0].write("dpi", {"stages": {7: {"x": 20000, "y": 1000}}})
 
 
 def test_unconfirmed_stage_write(r2):
@@ -128,4 +128,7 @@ def test_one_rejected_stage_does_not_block_the_rest(r2):
 def test_rewriting_a_stage_with_its_own_value_is_sent(r2):
     r2[1].dpi_limit = 26000
     with pytest.raises(AmError, match="rejected"):
+        r2[0].write("dpi", {"stages": {7: {"x": 30000, "y": 30000}}}, strict=False)
+    with pytest.raises(AmError, match="30000.*26000"):       # the command line stops it first
         r2[0].write("dpi", {"stages": {7: {"x": 30000, "y": 30000}}})
+    assert r2[1].sent_cmds().count(12484) == 1

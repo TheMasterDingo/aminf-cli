@@ -38,4 +38,6 @@ def test_model_table():
     assert list(MODELS) == ["97", "100r2", "100"]
     assert MODELS["100r2"].buttons[-1] == "bottom" and len(MODELS["97"].buttons) == 7
     assert (MODELS["97"].lod_max, MODELS["100r2"].lod_max) == (2, 4)
-    assert (MODELS["100r2"].dpi_max, MODELS["100"].dpi_max) == (30000, 26000)
+    # the configurator's code says 30000 for the .97 and .100R2, but both real
+    # mice answer status 2 to anything above 26000
+    assert [m.dpi_max for m in MODELS.values()] == [26000, 26000, 26000]

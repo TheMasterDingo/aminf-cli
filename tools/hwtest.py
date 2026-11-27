@@ -81,12 +81,15 @@ def vectors(model, s):
     stages = dpi.get("stages") or []
     if len(stages) >= 8:
         last = stages[7]
-        out.append(("dpi stage 8", "dpi",
-                    {"stages": {7: {"x": 1050 if last["x"] == 1000 else 1000}}},
-                    # first prove the mouse takes its own value back: the
-                    # owner's .100R2 shipped with 30000 here and its firmware
-                    # refuses anything above 26000
-                    {"stages": {7: {"x": last["x"], "y": last["y"]}}}))
+        # Each stage is first rewritten with its own value and left alone if
+        # the mouse refuses that: both the .97 and the .100R2 ship with
+        # 30000 in stage 8 and refuse anything above 26000. Stage 7 is
+        # tried too, so the value write is covered either way.
+        for i in (7, 6):
+            st = stages[i]
+            out.append((f"dpi stage {i + 1}", "dpi",
+                        {"stages": {i: {"x": 1050 if st["x"] == 1000 else 1000}}},
+                        {"stages": {i: {"x": st["x"], "y": st["y"]}}}))
         colour = "#00FFFF" if (last.get("colour") or "").upper() == "#00FF00" else "#00FF00"
         out.append(("dpi stage 8 colour", "dpi", {"stages": {7: {"colour": colour}}}))
     if "count" in dpi:

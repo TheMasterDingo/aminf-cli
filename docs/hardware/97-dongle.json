@@ -1,0 +1,188 @@
+{
+  "model": ".97",
+  "connection": "dongle",
+  "date": "2026-11-27",
+  "aminf": "3.0.0",
+  "profile": 0,
+  "checks": [
+    {
+      "check": "profile switch",
+      "result": "verified",
+      "detail": "0 -> 1 -> 0"
+    },
+    {
+      "check": "polling_rate",
+      "result": "verified",
+      "detail": "{\"polling_rate\": 1000}"
+    },
+    {
+      "check": "lod",
+      "result": "verified",
+      "detail": "{\"lod\": 1}"
+    },
+    {
+      "check": "motion_sync",
+      "result": "verified",
+      "detail": "{\"motion_sync\": false}"
+    },
+    {
+      "check": "angle_snap",
+      "result": "verified",
+      "detail": "{\"angle_snap\": true}"
+    },
+    {
+      "check": "ripple",
+      "result": "verified",
+      "detail": "{\"ripple\": true}"
+    },
+    {
+      "check": "fps_mode",
+      "result": "verified",
+      "detail": "{\"fps_mode\": true}"
+    },
+    {
+      "check": "profile_key",
+      "result": "verified",
+      "detail": "{\"profile_key\": false}"
+    },
+    {
+      "check": "angle",
+      "result": "verified",
+      "detail": "{\"angle\": 1}"
+    },
+    {
+      "check": "angle on/off",
+      "result": "verified",
+      "detail": "{\"angle_enabled\": true}"
+    },
+    {
+      "check": "sleep_24g",
+      "result": "verified",
+      "detail": "{\"sleep_24g\": 210}"
+    },
+    {
+      "check": "sleep_bt",
+      "result": "verified",
+      "detail": "{\"sleep_bt\": 90}"
+    },
+    {
+      "check": "debounce_wired",
+      "result": "verified",
+      "detail": "{\"debounce_wired\": 1}"
+    },
+    {
+      "check": "debounce_24g",
+      "result": "verified",
+      "detail": "{\"debounce_24g\": 1}"
+    },
+    {
+      "check": "debounce_bt",
+      "result": "verified",
+      "detail": "{\"debounce_bt\": 1}"
+    },
+    {
+      "check": "dpi stage 8",
+      "result": "unsupported",
+      "detail": "left untouched: the mouse will not take its own stored value back (the mouse rejected DPI stage 8 (30000, 30000) (status 0x02) -- this firmware does not take that value; everything else asked for was written)"
+    },
+    {
+      "check": "dpi stage 8 colour",
+      "result": "verified",
+      "detail": "{\"stages\": {\"7\": {\"colour\": \"#00FF00\"}}}"
+    },
+    {
+      "check": "dpi count",
+      "result": "verified",
+      "detail": "{\"count\": 8}"
+    },
+    {
+      "check": "dpi use",
+      "result": "verified",
+      "detail": "{\"active\": 1}"
+    },
+    {
+      "check": "dpi button",
+      "result": "verified",
+      "detail": "{\"button\": true}"
+    },
+    {
+      "check": "remap forward",
+      "result": "verified",
+      "detail": "{\"forward\": \"f13\"}"
+    },
+    {
+      "check": "remap wheel-down",
+      "result": "verified",
+      "detail": "{\"wheel-down\": \"media:mute\"}"
+    },
+    {
+      "check": "light on/off",
+      "result": "verified",
+      "detail": "{\"on\": false}"
+    },
+    {
+      "check": "light colour",
+      "result": "verified",
+      "detail": "{\"colour\": \"#00FF00\"}"
+    },
+    {
+      "check": "dongle light on/off",
+      "result": "verified",
+      "detail": "{\"on\": false}"
+    },
+    {
+      "check": "dongle light colour",
+      "result": "verified",
+      "detail": "{\"colour\": \"#00FF00\", \"hue1\": 510, \"sat1\": 100}"
+    },
+    {
+      "check": "dongle light brightness",
+      "result": "verified",
+      "detail": "{\"brightness\": 100}"
+    },
+    {
+      "check": "dongle light speed",
+      "result": "verified",
+      "detail": "{\"speed\": 5}"
+    },
+    {
+      "check": "dongle light effect",
+      "result": "verified",
+      "detail": "{\"effect\": \"breathing\"}"
+    }
+  ],
+  "not_checked": {},
+  "restore": [
+    [
+      "sensor",
+      "applied",
+      "polling_rate=4000, lod=0, motion_sync=True, angle_snap=False, ripple=False, fps_mode=False, profile_key=True, angle_enabled=False, angle=0"
+    ],
+    [
+      "power",
+      "applied",
+      "sleep_24g=180, sleep_bt=60, debounce_wired=0, debounce_24g=0, debounce_bt=0"
+    ],
+    [
+      "dpi",
+      "applied",
+      "stages.8.colour=#FFFFFF, count=1, active=0, button=False"
+    ],
+    [
+      "buttons",
+      "applied",
+      "forward=forward, wheel-down=wheel-down"
+    ],
+    [
+      "light",
+      "applied",
+      "on=True, colour=#FF823C"
+    ],
+    [
+      "dongle_light",
+      "applied",
+      "on=True, effect=solid, hue1=76, sat1=75, speed=12, brightness=120"
+    ]
+  ],
+  "restored": true
+}

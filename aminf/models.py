@@ -22,7 +22,7 @@ class Model:
     buttons: tuple               # button names in key-id order
     profiles: int                # onboard profiles (0-based on the CLI)
     lod_max: int                 # lift-off distance runs 0..lod_max
-    dpi_max: int                 # the configurator's ceiling, in DPI
+    dpi_max: int                 # highest DPI the mouse accepts
     hw_debounce: bool = False    # reports hardware debounce (read-only)
     sleep_nv_on_cable: bool = False   # cabled: sleep lives in an NV record
     profile_to_dongle: bool = False   # receiver keeps its own active profile
@@ -38,17 +38,21 @@ class Model:
         return Action("mouse", button)
 
 
+# dpi_max: the configurator's code allows 30000 on the .97 and .100R2, but
+# both real mice refuse anything above 26000 (status 2), even though they
+# ship with 30000 in their last stage. `import` still passes a larger value
+# through and lets the mouse decide, so newer firmware is not held back.
 MODELS = {m.key: m for m in (
     Model(".97", "97", "race",
           usb_ids=((0x0E8D, 0x0880), (0x35A1, 0x0035)),
           dongle_ids=((0x0E8D, 0x0703),),
-          buttons=BUTTONS_7, profiles=3, lod_max=2, dpi_max=30000,
+          buttons=BUTTONS_7, profiles=3, lod_max=2, dpi_max=26000,
           angle_switch=True),
     Model(".100R2", "100r2", "race",
           usb_ids=((0x0E8D, 0x0881),),
           dongle_ids=((0x0E8D, 0x0704),),
           buttons=BUTTONS_7 + ("bottom",), profiles=3, lod_max=4,
-          dpi_max=30000, hw_debounce=True, sleep_nv_on_cable=True,
+          dpi_max=26000, hw_debounce=True, sleep_nv_on_cable=True,
           profile_to_dongle=True, layer_switch=True, angle_switch=True),
     Model(".100", "100", "m100",
           usb_ids=((0x3151, 0x402A),),
