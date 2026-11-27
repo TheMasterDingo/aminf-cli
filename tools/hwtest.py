@@ -41,11 +41,7 @@ FLAGS = ("motion_sync", "angle_snap", "ripple", "fps_mode", "profile_key")
 
 
 # Checks left out on purpose, with the reason printed in every run.
-NOT_CHECKED = {
-    "100r2": {"light colour": "aminf writes the .97's 3-byte solid pattern; "
-              "how the .100R2 page writes it has not been read from the "
-              "bundle yet"},
-}
+NOT_CHECKED = {}
 
 
 def vectors(model, s):

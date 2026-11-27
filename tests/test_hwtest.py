@@ -16,7 +16,7 @@ def test_hwtest_restores_and_reports(r2fake, tmp_path):
             "light on/off", "dongle light on/off", "dongle light colour", "dongle light brightness",
             "dongle light speed", "dongle light effect", "profile switch"} <= names
     assert report["checks"][0]["check"] == "profile switch"      # first, while nothing else is changed
-    assert "light colour" not in names                           # .100R2: not verified against the bundle yet
+    assert "light colour" in names
     assert (tmp_path / "100r2-dongle-snapshot.json").exists()
 
 
