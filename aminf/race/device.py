@@ -145,6 +145,10 @@ class RaceMouse(Mouse):
     def connection(self):
         return "dongle" if self.has_dongle else "usb"
 
+    def forget_offline(self):
+        self.offline = False
+        self._probed = False
+
     def close(self):
         if self.dev:
             self.dev.close()

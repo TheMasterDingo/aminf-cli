@@ -72,6 +72,7 @@ class FakeRace(Hid):
       missing = {key}      those reads never answer ("12525:", "12483:08")
       reject = {cmd: st}   those writes answer with a non-zero status
       stick_profile_after  profile switches after the n-th are ignored
+      sleep_after_writes   the mouse goes offline after that many writes
     """
 
     def __init__(self, fixture, model_key, dongle=True):
@@ -88,6 +89,8 @@ class FakeRace(Hid):
         self.missing = set()
         self.reject = {}
         self.stick_profile_after = None
+        self.sleep_after_writes = None
+        self._writes = 0
         self.closed = False
         self._switches = 0
         self._queue = []
@@ -142,6 +145,9 @@ class FakeRace(Hid):
         if cmd not in self.drop_writes:
             self._apply(cmd, args, local)
         self._reply(dev, cmd, b"\x00")
+        self._writes += 1
+        if self.sleep_after_writes is not None and self._writes >= self.sleep_after_writes:
+            self.offline, self.sleep_after_writes = True, None
 
     def _reply(self, dev, cmd, payload):
         fr = bytes([0x05, 0x5B, (len(payload) + 2) & 0xFF, (len(payload) + 2) >> 8,

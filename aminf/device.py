@@ -14,6 +14,11 @@ class Mouse(ABC):
     dry_run = False
     offline = False        # set once the dongle reports the mouse away
 
+    def forget_offline(self):
+        """Try the mouse again after it was found asleep (the user says it
+        is awake now)."""
+        self.offline = False
+
     @abstractmethod
     def read(self, section):
         """The section as a dict, or None when this mouse has no such
