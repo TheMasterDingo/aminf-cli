@@ -73,6 +73,8 @@ class FakeRace(Hid):
       reject = {cmd: st}   those writes answer with a non-zero status
       stick_profile_after  profile switches after the n-th are ignored
       sleep_after_writes   the mouse goes offline after that many writes
+      dpi_limit            DPI values above it are rejected with status 2,
+                           as the owner's .100R2 does above 26000
     """
 
     def __init__(self, fixture, model_key, dongle=True):
@@ -90,6 +92,7 @@ class FakeRace(Hid):
         self.reject = {}
         self.stick_profile_after = None
         self.sleep_after_writes = None
+        self.dpi_limit = None
         self._writes = 0
         self.closed = False
         self._switches = 0
@@ -138,6 +141,11 @@ class FakeRace(Hid):
             if key in self.missing or key not in self.replies:
                 return
             self._reply(dev, cmd, self.replies[key])
+            return
+        too_high = (cmd == 12484 and self.dpi_limit is not None and
+                    max(args[1] | args[2] << 8, args[3] | args[4] << 8) > self.dpi_limit)
+        if too_high:
+            self._reply(dev, cmd, bytes([2]))
             return
         if cmd in self.reject:
             self._reply(dev, cmd, bytes([self.reject[cmd]]))

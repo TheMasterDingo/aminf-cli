@@ -25,8 +25,9 @@ import datetime
 import json
 import pathlib
 import sys
+import time
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+ROOT =pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -48,9 +49,10 @@ NOT_CHECKED = {
 
 
 def vectors(model, s):
-    """(check name, section, changes) for everything this mouse reports.
-    Each value differs from the snapshot `s` and is inside the model's
-    range."""
+    """(check name, section, changes[, probe]) for everything this mouse
+    reports. Each value differs from the snapshot `s` and is inside the
+    model's range. A probe rewrites the current value first; if the mouse
+    refuses that, the check is skipped and the value left alone."""
     out = []
     sensor, power, dpi = s.get("sensor", {}), s.get("power", {}), s.get("dpi", {})
     if "polling_rate" in sensor:
@@ -80,7 +82,11 @@ def vectors(model, s):
     if len(stages) >= 8:
         last = stages[7]
         out.append(("dpi stage 8", "dpi",
-                    {"stages": {7: {"x": 1050 if last["x"] == 1000 else 1000}}}))
+                    {"stages": {7: {"x": 1050 if last["x"] == 1000 else 1000}}},
+                    # first prove the mouse takes its own value back: the
+                    # owner's .100R2 shipped with 30000 here and its firmware
+                    # refuses anything above 26000
+                    {"stages": {7: {"x": last["x"], "y": last["y"]}}}))
         colour = "#00FFFF" if (last.get("colour") or "").upper() == "#00FF00" else "#00FF00"
         out.append(("dpi stage 8 colour", "dpi", {"stages": {7: {"colour": colour}}}))
     if "count" in dpi:
@@ -120,9 +126,17 @@ def vectors(model, s):
     return [v for v in out if v[0] not in skip]
 
 
+WAKE_WAIT = 20      # seconds to wait for the user when no terminal is attached
+
+
 def ask_to_wake():
-    input("  The mouse went to sleep. Move it or click a button, then press "
-          "Enter... ")
+    try:
+        input("  The mouse went to sleep. Move it or click a button, then "
+              "press Enter... ")
+    except EOFError:
+        print(f"\n  The mouse went to sleep. Move it or click a button; "
+              f"trying again in {WAKE_WAIT} s...")
+        time.sleep(WAKE_WAIT)
 
 
 def run(key, backend=None, device="auto", out_dir=None, yes=False, wake=None):
@@ -245,15 +259,25 @@ def _run(mouse, out_dir, yes, wake):
                   f"--mouse {model.key} profile {home}")
             return finish([], False)
 
-    for i, (name, section, changes) in enumerate(checks):
+    for i, check in enumerate(checks):
+        name, section, changes = check[:3]
         try:
+            if len(check) > 3:
+                try:
+                    mouse.write(section, check[3])
+                except MouseOffline:
+                    raise
+                except AmError as exc:
+                    record(name, "unsupported", f"left untouched: the mouse "
+                           f"will not take its own stored value back ({exc})")
+                    continue
             done = mouse.write(section, changes)
             record(name, "verified", json.dumps(done, sort_keys=True))
         except (Unsupported, NotInFirmware) as exc:
             record(name, "unsupported", str(exc))
         except MouseOffline:
-            for later, _, _ in checks[i:]:
-                record(later, "not run", "the mouse went to sleep")
+            for later in checks[i:]:
+                record(later[0], "not run", "the mouse went to sleep")
             break
         except AmError as exc:
             record(name, "failed", str(exc))

@@ -14,7 +14,7 @@ import json
 from aminf.actions import BUTTON_NAMES, format_action, parse_action
 from aminf.colour import hex_to_hue_sat, hex_to_rgb, rgb_to_hex
 from aminf.device import SECTIONS
-from aminf.errors import AmError
+from aminf.errors import AmError, MouseOffline
 from aminf.models import DPI_MIN, DPI_STEP
 
 FORMAT, VERSION = "aminf-profile", 1
@@ -251,19 +251,21 @@ def apply(mouse, doc, only=None, dry_run=False):
 
     Returns [(section, status, detail)] with status one of "applied",
     "unchanged", "would change" (dry run), "skipped" and "failed". The whole
-    file is validated before the first write. A failure stops the import;
-    the sections after it are reported as skipped.
+    file is validated before the first write. Sections are independent: one
+    that fails is reported and the rest are still applied, so a restore
+    never stops half-way over one refused value. Only a mouse that stops
+    answering ends the import; what was left is reported as skipped.
     """
     validate(doc, mouse.model, only)
     wanted_sections = [s for s in SECTIONS
                        if not only or any(s in GROUPS[g] for g in only)]
-    results, failed = [], False
+    results, gone = [], False
     for name in wanted_sections:
         wanted = doc["sections"].get(name)
         if wanted is None:
             continue
-        if failed:
-            results.append((name, "skipped", "not attempted after the failure"))
+        if gone:
+            results.append((name, "skipped", "the mouse stopped answering"))
             continue
         try:
             current = mouse.read(name)
@@ -280,7 +282,7 @@ def apply(mouse, doc, only=None, dry_run=False):
                 mouse.write(name, changes, strict=False)
                 results.append((name, "applied", _describe(changes)))
         except AmError as exc:
-            failed = True
+            gone = isinstance(exc, MouseOffline) or mouse.offline
             results.append((name, "failed", str(exc)))
     return results
 

@@ -474,8 +474,8 @@ def cmd_import(m, args, say):
         print(f"{section:<13} {status}{'  ' + detail if detail else ''}")
     bad = [section for section, status, _ in results if status == "failed"]
     if bad:
-        raise AmError(f"import stopped at '{bad[0]}'; sections before it "
-                      f"were applied, sections after it were not")
+        raise AmError(f"import did not complete: {', '.join(bad)} failed "
+                      f"(see above)")
 
 
 def to_int(text, what):

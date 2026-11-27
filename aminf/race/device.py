@@ -521,47 +521,50 @@ class RaceMouse(Mouse):
             active = changes["active"]
         else:
             active = min(cur["active"], count - 1) if cur else 0
+        select = "count" in changes or "active" in changes
 
-        # Values first, the way the configurator orders it.
-        done_stages, wanted_xy, wanted_colour = {}, {}, {}
+        # The configurator's order: stage count, stage values, active stage.
+        # A value the firmware refuses (the .100R2 takes nothing above 26000)
+        # does not stop the rest: everything else is written and confirmed,
+        # and the refusals are reported together at the end.
+        if "count" in changes:
+            self._write(CMD["setDpiLoopRange"], bytes([count]),
+                        what="the DPI stage count")
+        wanted_xy, wanted_colour, refused = {}, {}, []
         for i, st in sorted(stages.items()):
             if "x" in st or "y" in st:
                 x = st.get("x", cur["x"][i] if cur and "y" in st else st.get("y"))
                 y = st.get("y", x)
-                self._write(CMD["setDpi"], codec.set_dpi_stage(i, x, y),
-                            what=f"DPI stage {i + 1} ({x}, {y})")
-                wanted_xy[i] = (x, y)
-                if cur and i == cur["active"] and "count" not in changes \
-                        and "active" not in changes:
-                    # The sensor keeps using the old value until the stage
-                    # is selected again.
-                    self._write(CMD["setCurrentDpiStage"], bytes([i]),
-                                what="the active DPI stage")
+                try:
+                    self._write(CMD["setDpi"], codec.set_dpi_stage(i, x, y),
+                                what=f"DPI stage {i + 1} ({x}, {y})")
+                    wanted_xy[i] = (x, y)
+                except AmError as exc:
+                    if isinstance(exc, MouseOffline):
+                        raise
+                    refused.append(str(exc))
             if "rgb" in st:
                 self._write(CMD["saveRgb"], codec.save_dpi_colour(i, st["rgb"]),
                             what=f"the colour of DPI stage {i + 1}")
                 wanted_colour[i] = rgb_to_hex(*st["rgb"])
-        if "count" in changes:
-            self._write(CMD["setDpiLoopRange"], bytes([count]),
-                        what="the DPI stage count")
-        if "count" in changes or "active" in changes:
+        if select or (cur and cur["active"] in wanted_xy):
+            # Also needed after changing the active stage's own value: the
+            # sensor keeps the old one until the stage is selected again.
             self._write(CMD["setCurrentDpiStage"], bytes([active]),
                         what="the active DPI stage")
 
-        done = {}
-        if wanted_xy or "count" in changes or "active" in changes:
+        done, done_stages = {}, {}
+        if wanted_xy or select:
             def state():
                 d = self._dpi_raw()
                 if d is None:
                     return None
                 return ({i: (d["x"][i], d["y"][i]) for i in wanted_xy},
                         d["count"] if "count" in changes else None,
-                        d["active"] if "count" in changes or "active" in changes
-                        else None)
+                        d["active"] if select else None)
             self._confirm("DPI", (wanted_xy,
                                   count if "count" in changes else None,
-                                  active if "count" in changes or "active" in changes
-                                  else None), state)
+                                  active if select else None), state)
             for i, (x, y) in wanted_xy.items():
                 done_stages.setdefault(i, {}).update(x=x, y=y)
             if "count" in changes:
@@ -579,6 +582,10 @@ class RaceMouse(Mouse):
             self._need("dpi_button", "DPI button")
             done["button"] = self.set_verified("dpi_button", changes["button"],
                                                "DPI button")
+        if refused:
+            raise AmError("; ".join(refused) + " -- this firmware does not "
+                          "take that value; everything else asked for was "
+                          "written")
         return done
 
     # buttons ..............................................................

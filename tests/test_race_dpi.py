@@ -104,3 +104,28 @@ def test_dpi_button(r2):
 def test_unknown_dpi_key(r2):
     with pytest.raises(AmError, match="sideways"):
         r2[0].write("dpi", {"sideways": 1})
+
+
+# Found on the owner's .100R2: the firmware rejects any DPI above 26000
+# (status 2), although its last stage shipped holding 30000.
+
+def test_count_is_written_before_the_stages(r2):
+    r2[0].write("dpi", {"stages": {7: {"x": 1000}}, "count": 7, "active": 2})
+    assert [c for c in r2[1].sent_cmds() if c in (12484, 12486, 12487)] == [12486, 12484, 12487]
+
+
+def test_one_rejected_stage_does_not_block_the_rest(r2):
+    r2[1].dpi_limit = 26000
+    with pytest.raises(AmError, match="stage 8.*rejected|rejected.*stage 8"):
+        r2[0].write("dpi", {"stages": {7: {"x": 30000}, 6: {"x": 5000}, 5: {"colour": "#112233"}},
+                            "count": 7, "active": 2, "button": False}, strict=False)
+    d = r2[0].read("dpi")
+    assert d["stages"][6]["x"] == 5000 and d["stages"][5]["colour"] == "#112233"
+    assert (d["count"], d["active"], d["button"]) == (7, 2, False)
+    assert d["stages"][7]["x"] == 30000              # untouched: the mouse kept what it had
+
+
+def test_rewriting_a_stage_with_its_own_value_is_sent(r2):
+    r2[1].dpi_limit = 26000
+    with pytest.raises(AmError, match="rejected"):
+        r2[0].write("dpi", {"stages": {7: {"x": 30000, "y": 30000}}})

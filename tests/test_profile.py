@@ -129,8 +129,32 @@ def test_failure_midway_is_reported(r2):                                # Review
     doc["sections"]["dpi"]["count"] = 4
     r2[1].drop_writes = {12492}
     results = statuses(apply(r2[0], doc))
-    assert results["sensor"] == "failed" and results["dpi"] == "skipped"
-    assert r2[0].read("dpi")["count"] == 8
+    # one section failing does not stop the others: each is independent, and
+    # a restore that stops half-way leaves the mouse worse off
+    assert results["sensor"] == "failed" and results["dpi"] == "applied"
+    assert r2[0].read("dpi")["count"] == 4
+
+
+def test_a_mouse_that_falls_asleep_stops_the_import(r2):
+    doc = snapshot(r2[0])
+    doc["sections"]["sensor"]["lod"] = 3
+    doc["sections"]["dpi"]["count"] = 4
+    doc["sections"]["buttons"]["forward"] = "f13"
+    r2[1].sleep_after_writes = 1
+    results = statuses(apply(r2[0], doc))
+    assert results["sensor"] == "failed" and results["dpi"] == "skipped" and results["buttons"] == "skipped"
+
+
+def test_a_value_the_mouse_rejects_is_reported_and_the_rest_restored(r2):
+    doc = snapshot(r2[0])                       # stage 8 holds 30000
+    r2[1].dpi_limit = 26000
+    r2[0].write("dpi", {"stages": {7: {"x": 1000}}, "count": 7})
+    r2[0].write("buttons", {"forward": "f13"})
+    results = apply(r2[0], doc)
+    st = statuses(results)
+    assert st["dpi"] == "failed" and st["buttons"] == "applied"
+    assert "stage 8" in [d for s, _, d in results if s == "dpi"][0]
+    assert r2[0].read("dpi")["count"] == 8 and r2[0].read("buttons")["forward"] == "forward"
 
 
 def test_diff_is_minimal():

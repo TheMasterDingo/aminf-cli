@@ -81,3 +81,25 @@ def test_97_gets_the_mouse_light_colour_check(tmp_path):
     assert hwtest.run("97", backend=fake, out_dir=tmp_path, yes=True) == 0
     report = json.loads((tmp_path / "97-dongle.json").read_text())
     assert "light colour" in {c["check"] for c in report["checks"]}
+
+
+def test_wake_prompt_without_a_terminal_waits_instead_of_crashing(monkeypatch):
+    waited = []
+
+    def no_terminal(prompt=""):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", no_terminal)
+    monkeypatch.setattr(hwtest.time, "sleep", waited.append)
+    hwtest.ask_to_wake()
+    assert waited == [hwtest.WAKE_WAIT]
+
+
+def test_hwtest_leaves_a_stage_alone_if_the_mouse_rejects_its_own_value(r2fake, tmp_path):
+    r2fake.dpi_limit = 26000                    # stage 8 holds 30000, which cannot be written back
+    assert hwtest.run("100r2", backend=r2fake, out_dir=tmp_path, yes=True) == 0
+    report = json.loads((tmp_path / "100r2-dongle.json").read_text())
+    by_name = {c["check"]: c for c in report["checks"]}
+    assert by_name["dpi stage 8"]["result"] == "unsupported" and "30000" in by_name["dpi stage 8"]["detail"]
+    assert report["restored"] is True
+    assert r2fake.replies["12485:"][17:19] == (30000).to_bytes(2, "little")     # still 30000
