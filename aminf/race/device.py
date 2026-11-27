@@ -97,7 +97,6 @@ class RaceMouse(Mouse):
         # Mouse settings travel through the dongle's relay when on 2.4G.
         self.target = DEV_RELAY if has_dongle else DEV_LOCAL
         self._reader = codec.FrameReader()
-        self._probed = False
 
     # -- discovery ---------------------------------------------------------
 
@@ -147,7 +146,6 @@ class RaceMouse(Mouse):
 
     def forget_offline(self):
         self.offline = False
-        self._probed = False
 
     def close(self):
         if self.dev:
@@ -161,16 +159,28 @@ class RaceMouse(Mouse):
             print(f"  would send dev={device_id:#04x} cmd={cmd:#06x} "
                   f"{frame[:20].hex(' ')} ...")
             return False
-        self.dev.send_feature(bytes([codec.REPORT_ID]) + frame)
+        try:
+            self.dev.send_feature(bytes([codec.REPORT_ID]) + frame)
+        except OSError as exc:
+            raise self._lost(exc) from exc
         return True
+
+    def _lost(self, exc):
+        """The HID call itself failed: the device was unplugged or the
+        interface went away. Nothing more is sent in this run."""
+        self.offline = True
+        return MouseOffline(f"lost the connection to the device ({exc})")
 
     def _await(self, cmd, timeout):
         """Payload of the next reply to `cmd`; replies to anything else
         (left over from an earlier command) are dropped."""
         end = time.monotonic() + timeout
         while True:
-            report = self.dev.get_feature(codec.REPORT_ID,
-                                          codec.PAYLOAD_LEN + 1)
+            try:
+                report = self.dev.get_feature(codec.REPORT_ID,
+                                              codec.PAYLOAD_LEN + 1)
+            except OSError as exc:
+                raise self._lost(exc) from exc
             for fr in self._reader.feed(report):
                 if fr.cmd == cmd:
                     return fr.payload
@@ -198,19 +208,18 @@ class RaceMouse(Mouse):
         """A read whose silence means something. On a dongle, the first
         relayed read that times out is followed by one probe of the profile:
         no answer means the mouse is away (MouseOffline, remembered for the
-        rest of the run); an answer means only this setting is missing."""
+        rest of the run); an answer means only this setting is missing. The
+        probe is repeated after every silence, so a mouse that falls asleep
+        later in the run is still noticed."""
         device_id = self.target if device_id is None else device_id
         p = self.request(cmd, args, device_id)
         if p is not None or self.dry_run or device_id != DEV_RELAY:
             return p
-        if self._probed:
-            return None
         alive = cmd != CMD["getProfile"] and self.request(
             CMD["getProfile"], b"", DEV_RELAY, self.PROBE_TIMEOUT) is not None
         if not alive:
             self.offline = True
             raise MouseOffline("mouse is off or out of range")
-        self._probed = True
         return None
 
     def _write(self, cmd, data, device_id=None, what=None):
@@ -281,6 +290,12 @@ class RaceMouse(Mouse):
 
     def set_profile(self, index):
         _int_in("profile", index, 0, self.model.profiles - 1)
+        if not self.dry_run and self.profile() is None:
+            # asleep raises MouseOffline above; this is a mouse that answers
+            # but not with its profile. Either way nothing has been sent --
+            # on the .100R2 the receiver must never be switched alone.
+            raise AmError("could not read the active profile -- nothing "
+                          "written")
         data = bytes([index])
         if self.model.profile_to_dongle and self.has_dongle:
             # The .100R2's receiver keeps its own copy of the active layer.

@@ -51,9 +51,13 @@ class _FakeRaceHandle:
         self.fake = fake
 
     def send_feature(self, data):
+        if self.fake.unplugged:
+            raise OSError("write error")
         self.fake._receive(bytes(data))
 
     def get_feature(self, report_id, length):
+        if self.fake.unplugged:
+            raise OSError("read error")
         q = self.fake._queue
         return q.pop(0) if q else bytes(length)
 
@@ -73,6 +77,7 @@ class FakeRace(Hid):
       reject = {cmd: st}   those writes answer with a non-zero status
       stick_profile_after  profile switches after the n-th are ignored
       sleep_after_writes   the mouse goes offline after that many writes
+      unplug_after_writes  every HID call fails after that many writes
       dpi_limit            DPI values above it are rejected with status 2,
                            as the owner's .100R2 does above 26000
     """
@@ -93,6 +98,8 @@ class FakeRace(Hid):
         self.stick_profile_after = None
         self.sleep_after_writes = None
         self.dpi_limit = None
+        self.unplugged = False
+        self.unplug_after_writes = None
         self._writes = 0
         self.closed = False
         self._switches = 0
@@ -156,6 +163,8 @@ class FakeRace(Hid):
         self._writes += 1
         if self.sleep_after_writes is not None and self._writes >= self.sleep_after_writes:
             self.offline, self.sleep_after_writes = True, None
+        if self.unplug_after_writes is not None and self._writes >= self.unplug_after_writes:
+            self.unplugged = True
 
     def _reply(self, dev, cmd, payload):
         fr = bytes([0x05, 0x5B, (len(payload) + 2) & 0xFF, (len(payload) + 2) >> 8,

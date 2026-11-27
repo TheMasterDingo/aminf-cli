@@ -9,3 +9,4 @@ dist/
 build/
 *.egg-info/
 docs/hardware/*-snapshot.json
+*.spec

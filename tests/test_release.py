@@ -58,3 +58,8 @@ def test_pyproject_lists_every_package():
     for init in (ROOT / "aminf").rglob("__init__.py"):
         name = ".".join(init.parent.relative_to(ROOT).parts)
         assert f'"{name}"' in text, name
+
+
+def test_readme_leads_with_the_no_install_download():
+    assert "aminf.exe" in README and "pip install git+https://github.com/TheMasterDingo/aminf-cli" in README
+    assert README.index("aminf.exe") < README.index("git clone")

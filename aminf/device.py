@@ -37,6 +37,8 @@ class Mouse(ABC):
     connection = "dongle"  # "dongle" or "usb"
     dry_run = False
     offline = False        # set once the dongle reports the mouse away
+    # What a profile switch does besides switching, for the user to be told.
+    profile_switch_note = None
 
     def forget_offline(self):
         """Try the mouse again after it was found asleep (the user says it

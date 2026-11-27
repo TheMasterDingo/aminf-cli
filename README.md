@@ -38,6 +38,27 @@ whole profile to a file and putting it back.
 
 ## Install
 
+**Windows, nothing to install:** download `aminf.exe` from the
+[releases page](https://github.com/TheMasterDingo/aminf-cli/releases), open a
+terminal in the folder you saved it to, and run:
+
+```
+aminf.exe status
+```
+
+Python and everything else it needs are inside the file. (Programs packed
+this way are sometimes flagged by antivirus tools; you can build the same
+file yourself with `python tools/build_exe.py`.)
+
+**Any system with Python 3.9 or newer:**
+
+```
+pip install git+https://github.com/TheMasterDingo/aminf-cli
+aminf status
+```
+
+**Or run it from a copy of the repository:**
+
 ```
 pip install hidapi
 git clone https://github.com/TheMasterDingo/aminf-cli
@@ -45,19 +66,18 @@ cd aminf-cli
 python aminf.py status
 ```
 
-That is all it needs. Two other ways to have it:
-
-* `pip install .` in the cloned folder gives you an `aminf` command.
-* `aminf.pyz` from the releases page is the whole tool in one file:
-  `python aminf.pyz status`. (Build it yourself with
-  `python tools/build_pyz.py`.) `hidapi` is still installed separately.
+There is also `aminf.pyz` on the releases page: the whole tool in one small
+file for people who already have Python and `hidapi`
+(`python aminf.pyz status`; build it with `python tools/build_pyz.py`).
 
 Since 3.0 the code is a small package (`aminf/`) rather than one file, so
-copying `aminf.py` alone no longer works — copy the folder, or use
-`aminf.pyz`.
+copying `aminf.py` alone no longer works — use one of the ways above.
 
-Python 3.9 or newer. The hardware runs below used Python 3.13 on Windows;
-compatibility with 3.9 is checked by syntax only.
+The examples in this README say `aminf`; type `aminf.exe` or
+`python aminf.py` instead if that is how you run it.
+
+The hardware runs below used Python 3.13 on Windows; compatibility with
+Python 3.9 is checked by syntax only.
 
 **Linux** needs udev access to the devices:
 
@@ -391,7 +411,9 @@ line. The code is now a package with tests; `aminf.py` still starts it.
 
 Changed from 2.2.0: `remap --json` gives plain action strings (`"forward"`
 instead of `"forward (default)"`); the "no device" message is reworded;
-`--dry-run` with nothing named previews for whichever mouse is plugged in.
+`--dry-run` with nothing named previews for whichever mouse is plugged in;
+a dongle-light brightness or speed outside its range is now an error instead
+of being silently clamped.
 
 **2.2.0** — side-button remap (`aminf remap`) on both mice, F13–F24 included.
 DPI removed. .100: protocol checked byte for byte against the configurator

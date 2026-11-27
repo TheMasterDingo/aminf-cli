@@ -56,6 +56,8 @@ class FakeM100(Hid):
         self.profile_max = None
         self.offline = False
         self.drop_writes, self.drop_first, self.truncate = set(), set(), set()
+        self.missing = set()            # reads the firmware never answers
+        self.stale_keymap_once = False  # first key-map read returns an old reply
         self.sent = []                  # every packet that is not relay plumbing
         self.closed = False
         self._response = bytes(64)
@@ -124,7 +126,12 @@ class FakeM100(Hid):
 
     def _mouse(self, pkt):
         code = pkt[0]
-        if code in self.truncate:
+        if code in self.missing:
+            return None
+        if code == 208 and self.stale_keymap_once:
+            self.stale_keymap_once = False
+            return self.blocks[133]
+        if code in self.truncate and code != 208:
             return bytes([0, 1, 2, 3]).ljust(64, b"\0")
         if code == 133:
             b = bytearray(self.blocks[133])

@@ -56,6 +56,8 @@ def fast_timing(monkeypatch):
     monkeypatch.setattr(RaceMouse, "POLL", 0.0)
     import aminf.m100.device as m100_device
     monkeypatch.setattr(m100_device, "sleep", lambda seconds: None)
+    monkeypatch.setattr(m100_device.M100Link, "ROUTE_TIMEOUT", 0.05)
+    monkeypatch.setattr(m100_device.M100Link, "REPLY_TIMEOUT", 0.05)
 
 
 @pytest.fixture

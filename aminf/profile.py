@@ -11,11 +11,23 @@ from __future__ import annotations
 
 import json
 
-from aminf.actions import BUTTON_NAMES, format_action, parse_action
+from aminf.actions import (BUTTON_NAMES, check_left_click, format_action,
+                           parse_action)
 from aminf.colour import hex_to_hue_sat, hex_to_rgb, rgb_to_hex
 from aminf.device import SECTIONS
 from aminf.errors import AmError, MouseOffline
+from aminf.m100.device import EFFECT_IDS as M100_DONGLE_EFFECTS
 from aminf.models import DPI_MIN, DPI_STEP
+from aminf.race.device import DONGLE_EFFECTS as RACE_DONGLE_EFFECTS
+from aminf.race.device import MOUSE_EFFECTS as RACE_MOUSE_EFFECTS
+
+# The effect names each family's lights take, so a file is checked against
+# the mouse it is going to before anything is written.
+EFFECT_NAMES = {
+    ("race", "light"): tuple(RACE_MOUSE_EFFECTS.values()),
+    ("race", "dongle_light"): tuple(RACE_DONGLE_EFFECTS),
+    ("m100", "dongle_light"): tuple(M100_DONGLE_EFFECTS),
+}
 
 FORMAT, VERSION = "aminf-profile", 1
 
@@ -136,6 +148,12 @@ def validate(doc, model, only=None):
                 if key not in SCHEMA[name]:
                     raise AmError(f"{path}.{key}: unknown setting")
                 _check(f"{path}.{key}", v, SCHEMA[name][key])
+            effects = EFFECT_NAMES.get((model.family, name))
+            if effects and isinstance(sec.get("effect"), str) \
+                    and sec["effect"] not in effects:
+                raise AmError(f"{path}.effect: '{sec['effect']}' is not an "
+                              f"effect of the {model.name} -- use one of "
+                              f"{', '.join(effects)}")
             if name == "sensor" and _is_int(sec.get("lod")) \
                     and sec["lod"] > model.lod_max:
                 warnings.append(f"lod {sec['lod']} is above the "
@@ -215,6 +233,10 @@ def diff(current, wanted, section):
             action = parse_action(text)
             if action is None or action.kind == "opaque":
                 continue
+            if current[button].startswith("opaque:"):
+                continue                     # a macro sits there now: aminf
+                                             # could not put it back, so an
+                                             # import never replaces it
             if format_action(action) != current[button]:
                 out[button] = format_action(action)
         return out
@@ -251,7 +273,9 @@ def apply(mouse, doc, only=None, dry_run=False):
 
     Returns [(section, status, detail)] with status one of "applied",
     "unchanged", "would change" (dry run), "skipped" and "failed". The whole
-    file is validated before the first write. Sections are independent: one
+    file is validated, every section is read, and what the changes would do
+    is checked, all before the first write: anything wrong up to there
+    raises and nothing is written. After that, sections are independent: one
     that fails is reported and the rest are still applied, so a restore
     never stops half-way over one refused value. Only a mouse that stops
     answering ends the import; what was left is reported as skipped.
@@ -259,32 +283,64 @@ def apply(mouse, doc, only=None, dry_run=False):
     validate(doc, mouse.model, only)
     wanted_sections = [s for s in SECTIONS
                        if not only or any(s in GROUPS[g] for g in only)]
-    results, gone = [], False
+
+    # Plan: read everything and work out the changes. Nothing is written.
+    plan = []
     for name in wanted_sections:
         wanted = doc["sections"].get(name)
         if wanted is None:
             continue
-        if gone:
-            results.append((name, "skipped", "the mouse stopped answering"))
+        current = mouse.read(name)
+        if current is None:
+            plan.append((name, None, "not available on this mouse or "
+                         "connection"))
             continue
-        try:
-            current = mouse.read(name)
-            if current is None:
-                results.append((name, "skipped", "not available on this "
-                                "mouse or connection"))
-                continue
-            changes = diff(current, wanted, name)
-            if not changes:
-                results.append((name, "unchanged", ""))
-            elif dry_run:
-                results.append((name, "would change", _describe(changes)))
-            else:
+        changes = diff(current, wanted, name)
+        note = _preflight(name, current, wanted, changes)
+        plan.append((name, changes, note))
+
+    results, gone = [], False
+    for name, changes, note in plan:
+        if changes is None:
+            results.append((name, "skipped", note))
+        elif gone:
+            results.append((name, "skipped", "the mouse stopped answering"))
+        elif not changes:
+            results.append((name, "unchanged", note))
+        elif dry_run:
+            results.append((name, "would change", _describe(changes)))
+        else:
+            try:
                 mouse.write(name, changes, strict=False)
-                results.append((name, "applied", _describe(changes)))
-        except AmError as exc:
-            gone = isinstance(exc, MouseOffline) or mouse.offline
-            results.append((name, "failed", str(exc)))
+                detail = _describe(changes) + (f"  ({note})" if note else "")
+                results.append((name, "applied", detail))
+            except AmError as exc:
+                gone = isinstance(exc, MouseOffline) or mouse.offline
+                results.append((name, "failed", str(exc)))
     return results
+
+
+def _preflight(name, current, wanted, changes):
+    """Refuse, before anything is written, a change the mouse's driver
+    would refuse half-way through. Returns a note for the report."""
+    if name == "dpi" and "active" in changes:
+        count = changes.get("count", current.get("count", 8))
+        if changes["active"] >= count:
+            raise AmError(f"sections.dpi.active: stage "
+                          f"{changes['active'] + 1} is outside the {count} "
+                          f"stage(s) in use")
+    if name == "buttons":
+        if changes:
+            merged = {b: parse_action(t) for b, t in current.items()}
+            merged.update({b: parse_action(t) for b, t in changes.items()})
+            check_left_click(merged)
+        kept = [b for b, t in wanted.items()
+                if b in current and current[b].startswith("opaque:")
+                and t != current[b]]
+        if kept:
+            return (f"{', '.join(kept)} left alone: bound to a macro on the "
+                    f"mouse")
+    return ""
 
 
 # -------------------------------------------------------------------- load

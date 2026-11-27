@@ -19,7 +19,7 @@ from aminf.actions import (BUTTON_NAMES, check_left_click, format_action,
 from aminf.colour import hex_to_rgb, rgb_to_hex
 from aminf.device import Mouse, reject_key
 from aminf.errors import (AmError, DeviceBusy, DeviceNotFound, MouseOffline,
-                          NotConfirmed, Unsupported)
+                          NotConfirmed, NotInFirmware, Unsupported)
 from aminf.m100 import codec
 from aminf.models import DPI_MIN, DPI_STEP
 
@@ -45,6 +45,10 @@ KEYMAP_DELAYS = ((0.25, 0.4, 0.6), (0.5, 0.7))
 PROFILE_DELAYS = (0.25, 0.4, 0.6)
 PROFILE_COUNT = 2            # what the configurator sends as "profile max"
 SLEEP_NEVER = 0xFFFF
+# Key-map entry types the mouse can report (keyboard, mouse function,
+# media, macro, rapid fire, DPI). Used to tell a real key map from a stale
+# reply, which always starts with a command byte.
+KEY_TYPES = frozenset({0, 1, 3, 9, 11, 20})
 SLEEP_MIN = 15
 
 PARAM_SENSOR = ("polling_rate", "lod", "motion_sync", "angle_snap", "ripple")
@@ -379,8 +383,15 @@ class M100Mouse(Mouse):
                               {o: v & 0xFF for o, v in offsets.items()}, state)
 
     def _toggle_get(self, name):
+        """The setting's value, or None when this firmware does not answer
+        the read. A mouse that is away still raises MouseOffline."""
         read, _ = codec.TOGGLES[name]
-        r = self._to_mouse(codec.cmd(read), expect=True)
+        try:
+            r = self._to_mouse(codec.cmd(read), expect=True)
+        except MouseOffline:
+            raise
+        except AmError:
+            return None
         if not r or r[0] != read:
             return None
         return _int8(r[1]) if name == "angle" else r[1] == 1
@@ -388,6 +399,9 @@ class M100Mouse(Mouse):
     def _toggle_set(self, name, value):
         _, write = codec.TOGGLES[name]
         byte = value & 0xFF if name == "angle" else (1 if value else 0)
+        if not self.dry_run and self._toggle_get(name) is None:
+            # never write a setting that cannot be read back
+            raise NotInFirmware(f"{name}: not supported by this firmware")
         return self._write_confirmed(
             name, lambda: self._to_mouse(codec.cmd(write, [byte]), expect=False),
             value, lambda: self._toggle_get(name))
@@ -438,14 +452,22 @@ class M100Mouse(Mouse):
 
     def set_profile(self, index):
         _int_in("profile", index, 0, self.model.profiles - 1)
+        if not self.dry_run and self._profile() == index:
+            return index              # already there: change nothing at all
         # The configurator always sends its own profile count here.
         self._to_mouse(codec.set_profile(index, PROFILE_COUNT), expect=False)
         self._confirm("profile", index, self._profile, PROFILE_DELAYS)
         # ...and then turns performance mode off, which a switch leaves in an
-        # undefined state. aminf does the same.
-        self._to_mouse(codec.cmd(codec.TOGGLES["fps_mode"][1], [0]),
-                       expect=False)
+        # undefined state. aminf does the same, confirms it, and says so
+        # (profile_switch_note).
+        try:
+            self._toggle_set("fps_mode", False)
+        except NotInFirmware:
+            pass
         return index
+
+    profile_switch_note = ("FPS (performance) mode was turned off, as the "
+                           "configurator does after a profile switch")
 
     # -- sections ------------------------------------------------------------
 
@@ -645,14 +667,17 @@ class M100Mouse(Mouse):
     # buttons ..............................................................
 
     def _keymap(self, profile):
-        # The key map comes back without an echo of the command byte, so a
-        # reply left over from an earlier command can only be told apart by
-        # asking again: a real key map never changes between two reads.
-        r = self._to_mouse(codec.cmd(codec.GET_KEYMAP, [profile, 0]),
-                           expect=True)
-        if not r or len(r) != codec.LEN:
-            raise AmError("could not read the key map")
-        return r
+        # The key map comes back without an echo of the command byte (the
+        # configurator skips its echo check here too), so the one way to
+        # catch a reply left over from an earlier command is that byte 0 of
+        # a real key map is a key type, never a command byte.
+        for _ in range(2):
+            r = self._to_mouse(codec.cmd(codec.GET_KEYMAP, [profile, 0]),
+                               expect=True)
+            if r and len(r) == codec.LEN and r[0] in KEY_TYPES:
+                return r
+            sleep(0.05)
+        raise AmError("could not read the key map")
 
     def _buttons(self, profile=None):
         """{button: Action} for the seven buttons."""

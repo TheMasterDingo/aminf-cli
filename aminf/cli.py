@@ -488,7 +488,7 @@ def cmd_import(m, args, say):
     for warning in warnings:
         say(f"warning: {warning}")
     active = m.profile()
-    if doc.get("profile") is not None and active is not None             and doc["profile"] != active:
+    if None not in (doc.get("profile"), active) and doc["profile"] != active:
         say(f"note: the file was saved from profile {doc['profile']}; "
             f"writing to the active profile, {active}")
     results = profile.apply(m, doc, only, dry)
@@ -546,8 +546,11 @@ def run_command(m, args, say):
             emit(args, m.model, {"profile": need(m.profile(), "active profile")},
                  [f"profile        {m.profile()}"] if not args.json else [])
         else:
+            before = None if m.dry_run else m.profile()
             m.set_profile(args.index)
             say(f"profile -> {args.index}")
+            if m.profile_switch_note and before != args.index:
+                say(f"note: {m.profile_switch_note}")
     elif c == "export":
         cmd_export(m, args, say)
     elif c == "import":
