@@ -3,12 +3,12 @@
   "connection": "usb",
   "date": "2026-11-27",
   "aminf": "3.0.0",
-  "profile": 1,
+  "profile": 0,
   "checks": [
     {
       "check": "profile switch",
       "result": "verified",
-      "detail": "1 -> 2 -> 1"
+      "detail": "0 -> 1 -> 0"
     },
     {
       "check": "polling_rate",
@@ -63,27 +63,27 @@
     {
       "check": "sleep_bt",
       "result": "verified",
-      "detail": "{\"sleep_bt\": 210}"
+      "detail": "{\"sleep_bt\": 90}"
     },
     {
       "check": "debounce_wired",
       "result": "verified",
-      "detail": "{\"debounce_wired\": 2}"
+      "detail": "{\"debounce_wired\": 1}"
     },
     {
       "check": "debounce_24g",
       "result": "verified",
-      "detail": "{\"debounce_24g\": 2}"
+      "detail": "{\"debounce_24g\": 1}"
     },
     {
       "check": "debounce_bt",
       "result": "verified",
-      "detail": "{\"debounce_bt\": 2}"
+      "detail": "{\"debounce_bt\": 1}"
     },
     {
       "check": "dpi stage 8",
-      "result": "verified",
-      "detail": "{\"stages\": {\"7\": {\"x\": 1000, \"y\": 1000}}}"
+      "result": "unsupported",
+      "detail": "left untouched: the mouse will not take its own stored value back (DPI x 30000 is not valid: the .100R2 takes 50-26000 in steps of 50)"
     },
     {
       "check": "dpi stage 7",
@@ -98,7 +98,7 @@
     {
       "check": "dpi count",
       "result": "verified",
-      "detail": "{\"count\": 7}"
+      "detail": "{\"count\": 8}"
     },
     {
       "check": "dpi use",
@@ -108,7 +108,7 @@
     {
       "check": "dpi button",
       "result": "verified",
-      "detail": "{\"button\": false}"
+      "detail": "{\"button\": true}"
     },
     {
       "check": "remap forward",
@@ -124,26 +124,29 @@
       "check": "light on/off",
       "result": "verified",
       "detail": "{\"on\": false}"
+    },
+    {
+      "check": "light colour",
+      "result": "verified",
+      "detail": "{\"colour\": \"#00FF00\"}"
     }
   ],
-  "not_checked": {
-    "light colour": "aminf writes the .97's 3-byte solid pattern; how the .100R2 page writes it has not been read from the bundle yet"
-  },
+  "not_checked": {},
   "restore": [
     [
       "sensor",
       "applied",
-      "polling_rate=8000, lod=1, motion_sync=True, angle_snap=False, ripple=False, fps_mode=False, profile_key=True, angle_enabled=False, angle=0"
+      "polling_rate=4000, lod=1, motion_sync=True, angle_snap=False, ripple=False, fps_mode=False, profile_key=True, angle_enabled=False, angle=0"
     ],
     [
       "power",
       "applied",
-      "sleep_24g=180, sleep_bt=180, debounce_wired=1, debounce_24g=1, debounce_bt=1"
+      "sleep_24g=180, sleep_bt=60, debounce_wired=0, debounce_24g=0, debounce_bt=0"
     ],
     [
       "dpi",
       "applied",
-      "stages.7.x=10000, stages.7.y=10000, stages.8.x=26000, stages.8.y=26000, stages.8.colour=#FFFFFF, count=8, active=3, button=True"
+      "stages.7.x=10000, stages.7.y=10000, stages.8.colour=#FFFFFF, count=1, active=0, button=False"
     ],
     [
       "buttons",
@@ -153,7 +156,7 @@
     [
       "light",
       "applied",
-      "on=True"
+      "on=True, colour=#FA870D"
     ]
   ],
   "restored": true
