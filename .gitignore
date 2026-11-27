@@ -8,3 +8,4 @@ bundle-split/
 dist/
 build/
 *.egg-info/
+docs/hardware/*-snapshot.json
