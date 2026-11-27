@@ -3,7 +3,7 @@
 Read-only: it sends nothing but reads the web configurator sends when it
 loads its pages, and saves the raw replies as a test fixture.
 
-usage: python tools/capture.py <97|100r2> [--device dongle|usb] [--out DIR]
+usage: python tools/capture.py <97|100r2|100> [--device dongle|usb] [--out DIR]
 
 Writes <DIR>/<model>-<connection>.json (default DIR: tests/fixtures).
 Reply keys are "<cmd>:<args hex>" for the mouse and "local/<cmd>:<args hex>"
@@ -71,13 +71,67 @@ def find(backend, model, prefer):
     return usb, False
 
 
+def capture_m100(prefer, out_dir):
+    """The .100: the reads its configurator pages send. Uses the 2.2.0 link
+    code for the report-id probe and the dongle's relay handshake."""
+    from aminf import legacy100
+    from aminf.m100 import codec as m100
+
+    # reads the configurator sends that 2.2.0 never needed
+    legacy100.M100_ALLOWED |= {m100.GET_DPI} | {r for r, _ in m100.TOGGLES.values()}
+    dev = legacy100.Am100.open(HidapiBackend(), prefer=prefer)
+    replies, answered = {}, 0
+
+    def save(key, fetch):
+        nonlocal answered
+        try:
+            r = fetch()
+        except Exception as exc:                      # asleep, relay timeout
+            r = None
+            print(f"{key:20} -- {exc}")
+        replies[key] = None if r is None else bytes(r).hex()
+        if r is not None:
+            answered += 1
+            print(f"{key:20} {bytes(r).hex(' ')}")
+        return r
+
+    try:
+        if dev.dongle:
+            save(f"local/{m100.DONGLE_STATUS}:",
+                 lambda: dev.dongle.send(list(m100.raw(m100.DONGLE_STATUS)), expect=True))
+            for code in (m100.GET_DONGLE_SWITCH, m100.GET_DONGLE_LIGHT):
+                save(f"local/{code}:",
+                     lambda code=code: dev.dongle.send(list(m100.cmd(code)), expect=True))
+        prof = save(f"{m100.GET_PROFILE}:",
+                    lambda: dev._to_mouse(list(m100.cmd(m100.GET_PROFILE)), expect=True))
+        profile = prof[1] if prof and prof[0] == m100.GET_PROFILE and prof[1] < 8 else 0
+        for code, params in ((m100.GET_BATTERY, ()), (m100.GET_PARAMS, ()),
+                             (m100.GET_DPI, (profile,)), (m100.GET_KEYMAP, (profile, 0)),
+                             (226, ()), (227, ()), (228, ()), (229, ())):
+            save(f"{code}:{bytes(params).hex()}",
+                 lambda code=code, params=params: dev._to_mouse(
+                     list(m100.cmd(code, params)), expect=True))
+        connection = "dongle" if dev.dongle else "usb"
+    finally:
+        dev.close()
+    out = pathlib.Path(out_dir) / f"100-{connection}.json"
+    out.write_text(json.dumps({
+        "model": "100", "connection": connection, "profile": profile,
+        "captured": datetime.date.today().isoformat(), "replies": replies,
+    }, indent=1) + "\n", encoding="utf-8", newline="\n")
+    print(f"{answered} of {len(replies)} reads answered -> {out}")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("model", choices=[k for k, m in MODELS.items() if m.family == "race"])
+    ap.add_argument("model", choices=list(MODELS))
     ap.add_argument("--device", choices=["auto", "dongle", "usb"], default="auto")
     ap.add_argument("--out", default=str(pathlib.Path(__file__).resolve().parent.parent / "tests" / "fixtures"))
     args = ap.parse_args(argv)
     model = MODELS[args.model]
+    if model.family == "m100":
+        return capture_m100(args.device, args.out)
     backend = HidapiBackend()
     found, is_dongle = find(backend, model, args.device)
     if not found:

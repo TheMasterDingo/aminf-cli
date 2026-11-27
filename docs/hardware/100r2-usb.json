@@ -1,0 +1,160 @@
+{
+  "model": ".100R2",
+  "connection": "usb",
+  "date": "2026-11-27",
+  "aminf": "3.0.0",
+  "profile": 1,
+  "checks": [
+    {
+      "check": "profile switch",
+      "result": "verified",
+      "detail": "1 -> 2 -> 1"
+    },
+    {
+      "check": "polling_rate",
+      "result": "verified",
+      "detail": "{\"polling_rate\": 1000}"
+    },
+    {
+      "check": "lod",
+      "result": "verified",
+      "detail": "{\"lod\": 2}"
+    },
+    {
+      "check": "motion_sync",
+      "result": "verified",
+      "detail": "{\"motion_sync\": false}"
+    },
+    {
+      "check": "angle_snap",
+      "result": "verified",
+      "detail": "{\"angle_snap\": true}"
+    },
+    {
+      "check": "ripple",
+      "result": "verified",
+      "detail": "{\"ripple\": true}"
+    },
+    {
+      "check": "fps_mode",
+      "result": "verified",
+      "detail": "{\"fps_mode\": true}"
+    },
+    {
+      "check": "profile_key",
+      "result": "verified",
+      "detail": "{\"profile_key\": false}"
+    },
+    {
+      "check": "angle",
+      "result": "verified",
+      "detail": "{\"angle\": 1}"
+    },
+    {
+      "check": "angle on/off",
+      "result": "verified",
+      "detail": "{\"angle_enabled\": true}"
+    },
+    {
+      "check": "sleep_24g",
+      "result": "verified",
+      "detail": "{\"sleep_24g\": 210}"
+    },
+    {
+      "check": "sleep_bt",
+      "result": "verified",
+      "detail": "{\"sleep_bt\": 210}"
+    },
+    {
+      "check": "debounce_wired",
+      "result": "verified",
+      "detail": "{\"debounce_wired\": 2}"
+    },
+    {
+      "check": "debounce_24g",
+      "result": "verified",
+      "detail": "{\"debounce_24g\": 2}"
+    },
+    {
+      "check": "debounce_bt",
+      "result": "verified",
+      "detail": "{\"debounce_bt\": 2}"
+    },
+    {
+      "check": "dpi stage 8",
+      "result": "verified",
+      "detail": "{\"stages\": {\"7\": {\"x\": 1000, \"y\": 1000}}}"
+    },
+    {
+      "check": "dpi stage 7",
+      "result": "verified",
+      "detail": "{\"stages\": {\"6\": {\"x\": 1000, \"y\": 1000}}}"
+    },
+    {
+      "check": "dpi stage 8 colour",
+      "result": "verified",
+      "detail": "{\"stages\": {\"7\": {\"colour\": \"#00FF00\"}}}"
+    },
+    {
+      "check": "dpi count",
+      "result": "verified",
+      "detail": "{\"count\": 7}"
+    },
+    {
+      "check": "dpi use",
+      "result": "verified",
+      "detail": "{\"active\": 1}"
+    },
+    {
+      "check": "dpi button",
+      "result": "verified",
+      "detail": "{\"button\": false}"
+    },
+    {
+      "check": "remap forward",
+      "result": "verified",
+      "detail": "{\"forward\": \"f13\"}"
+    },
+    {
+      "check": "remap wheel-down",
+      "result": "verified",
+      "detail": "{\"wheel-down\": \"media:mute\"}"
+    },
+    {
+      "check": "light on/off",
+      "result": "verified",
+      "detail": "{\"on\": false}"
+    }
+  ],
+  "not_checked": {
+    "light colour": "aminf writes the .97's 3-byte solid pattern; how the .100R2 page writes it has not been read from the bundle yet"
+  },
+  "restore": [
+    [
+      "sensor",
+      "applied",
+      "polling_rate=8000, lod=1, motion_sync=True, angle_snap=False, ripple=False, fps_mode=False, profile_key=True, angle_enabled=False, angle=0"
+    ],
+    [
+      "power",
+      "applied",
+      "sleep_24g=180, sleep_bt=180, debounce_wired=1, debounce_24g=1, debounce_bt=1"
+    ],
+    [
+      "dpi",
+      "applied",
+      "stages.7.x=10000, stages.7.y=10000, stages.8.x=26000, stages.8.y=26000, stages.8.colour=#FFFFFF, count=8, active=3, button=True"
+    ],
+    [
+      "buttons",
+      "applied",
+      "forward=forward, wheel-down=wheel-down"
+    ],
+    [
+      "light",
+      "applied",
+      "on=True"
+    ]
+  ],
+  "restored": true
+}
