@@ -17,7 +17,7 @@ def test_pyz_runs(tmp_path):
     out = build_pyz.build(tmp_path)
     r = subprocess.run([sys.executable, str(out), "--version"],
                        capture_output=True, text=True)
-    assert r.returncode == 0 and "3.0.0" in r.stdout
+    assert r.returncode == 0 and "3.1.0" in r.stdout
 
 
 def test_readme_documents_every_command():
@@ -35,7 +35,7 @@ def test_readme_lists_udev_ids_for_every_model():
 def test_readme_names_every_model_and_the_real_dpi_limit():
     for model in MODELS.values():
         assert model.name in README
-    assert "26000" in README and "3.0.0" in README
+    assert "26000" in README and "**3.1.0**" in README and "**3.0.0**" in README
 
 
 def test_sources_parse_as_python_3_9():       # only 3.13 is installed here, so pin the syntax floor

@@ -189,3 +189,67 @@ def test_raw_is_read_only(run, r2fake):
 
 def test_quiet(run, r2fake):
     assert run(["--quiet", "lod", "2"], r2fake)[1] == ""
+
+
+# `light set` / `mouse-light set`: several light settings in one command
+
+def test_light_set_changes_several_things_in_one_write(run, r2fake):
+    code, out, _ = run(["light", "set", "--color", "#FF7940", "--brightness", "120",
+                        "--speed", "12", "--effect", "solid", "--on"], r2fake)
+    assert code == 0 and "dongle light ->" in out and "120" in out
+    assert r2fake.sent_cmds().count(12301) == 1                 # one message, not five
+    sent = r2fake.sent_data(12301)
+    assert sent[0] == 1 and sent[1] == 1 and sent[2:5] == bytes([0, 76, 75])
+    assert sent[11] == 12 + 80 and sent[12] == 120
+
+
+def test_light_set_second_and_third_colours(run, r2fake):
+    from aminf.colour import hex_to_hue_sat
+    assert run(["light", "set", "--color2", "#B100FF", "--color3", "#00FF00"], r2fake)[0] == 0
+    sent = r2fake.sent_data(12301)
+    h2, s2 = hex_to_hue_sat("#B100FF")
+    h3, s3 = hex_to_hue_sat("#00FF00")
+    assert sent[5:8] == bytes([h2 >> 8, h2 & 0xFF, s2]) and sent[8:11] == bytes([h3 >> 8, h3 & 0xFF, s3])
+    assert sent[2:5] == r2fake.replies["local/12302:"][2:5]     # the first colour is untouched
+
+
+def test_light_set_off(run, r2fake):
+    run(["light", "set", "--on"], r2fake)
+    assert run(["light", "set", "--off", "--brightness", "50"], r2fake)[0] == 0
+    assert r2fake.sent_data(12301)[0] == 0 and r2fake.sent_data(12301)[12] == 50
+
+
+def test_light_set_needs_something(run, r2fake):
+    code, _, err = run(["light", "set"], r2fake)
+    assert code == 2 and "nothing to set" in err and 12301 not in r2fake.sent_cmds()
+
+
+def test_light_set_bad_value_changes_nothing(run, r2fake):
+    code, _, err = run(["light", "set", "--brightness", "120", "--effect", "disco"], r2fake)
+    assert code == 2 and 12301 not in r2fake.sent_cmds()
+
+
+def test_mouse_light_set(run, r2fake):
+    code, out, _ = run(["mouse-light", "set", "--color", "#00FF00", "--off"], r2fake)
+    assert code == 0 and "mouse light ->" in out
+    assert r2fake.sent_data(12467)[0] == 0
+    assert r2fake.sent_data(2573)[-3:] == bytes([0, 255, 0])
+
+
+def test_light_set_dry_run(run, r2fake):
+    code, out, _ = run(["--dry-run", "light", "set", "--brightness", "120", "--speed", "5"], r2fake)
+    assert code == 0 and out.count("would send") == 1 and r2fake.sent == []
+
+
+def test_light_set_on_the_100(run):
+    from tests.conftest import load
+    from tests.fake_m100 import FakeM100
+    fake = FakeM100(load("100-dongle"))
+    code, out, _ = run(["--mouse", "100", "light", "set", "--color", "#102030", "--brightness", "2",
+                        "--effect", "breathing", "--speed", "3"], fake)
+    assert code == 0
+    assert fake.sent_cmds().count(8) == 1 and fake.sent_packet(8)[1:8] == bytes([2, 3, 2, 7, 0x10, 0x20, 0x30])
+    code, out, _ = run(["--mouse", "100", "light", "set", "--color2", "#B100FF"], fake)
+    assert code == 0 and "skipped" in out                        # the .100 has one colour
+    code, out, _ = run(["--mouse", "100", "mouse-light", "set", "--color", "#00FF00", "--charged", "#0000FF"], fake)
+    assert code == 0 and fake.sent_packet(83)[54:60] == bytes([0, 255, 0, 0, 0, 255])

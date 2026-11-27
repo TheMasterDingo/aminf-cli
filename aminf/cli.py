@@ -216,6 +216,18 @@ def build_parser():
     q = ls.add_parser("brightness"); q.add_argument("value", type=int)
     q = ls.add_parser("speed"); q.add_argument("value", type=int)
     q = ls.add_parser("effect"); q.add_argument("name")
+    q = ls.add_parser("set", help="several settings at once, in one write")
+    q.add_argument("--color", "--colour", dest="color", metavar="#RRGGBB")
+    q.add_argument("--color2", "--colour2", dest="color2", metavar="#RRGGBB",
+                   help="second colour of multi-colour effects (.97, .100R2)")
+    q.add_argument("--color3", "--colour3", dest="color3", metavar="#RRGGBB",
+                   help="third colour (.97, .100R2)")
+    q.add_argument("--brightness", type=int)
+    q.add_argument("--speed", type=int)
+    q.add_argument("--effect")
+    g = q.add_mutually_exclusive_group()
+    g.add_argument("--on", dest="switch", action="store_const", const=True)
+    g.add_argument("--off", dest="switch", action="store_const", const=False)
 
     p = sub.add_parser("mouse-light", help="mouse lighting")
     ms = p.add_subparsers(dest="action", required=True)
@@ -224,6 +236,15 @@ def build_parser():
     q = ms.add_parser("color", aliases=["colour"]); q.add_argument("hex")
     q.add_argument("--charged", action="store_true",
                    help="the colour shown once charged (.100)")
+    q = ms.add_parser("set", help="several settings at once")
+    q.add_argument("--color", "--colour", dest="color", metavar="#RRGGBB")
+    q.add_argument("--charged", metavar="#RRGGBB",
+                   help="the colour shown once charged (.100)")
+    q.add_argument("--effect", help=".97, .100R2")
+    q.add_argument("--speed", type=int, help=".97, .100R2")
+    g = q.add_mutually_exclusive_group()
+    g.add_argument("--on", dest="switch", action="store_const", const=True)
+    g.add_argument("--off", dest="switch", action="store_const", const=False)
 
     p = sub.add_parser("all", help="dongle and mouse lighting together")
     p.add_argument("action", choices=["on", "off", "toggle"])
@@ -330,6 +351,27 @@ def cmd_light(m, args, say):
         on = light_state(cur, a)
         m.write(section, {"on": on})
         say(f"{what} light -> {on_off(on)}")
+    elif a == "set":
+        # option -> section key; everything given goes to the mouse in one
+        # write, so the firmware block is read and written once
+        names = ({"color": "colour", "color2": "colour2", "color3": "colour3",
+                  "brightness": "brightness", "speed": "speed",
+                  "effect": "effect", "switch": "on"} if dongle else
+                 {"color": "colour", "charged": "colour_charged",
+                  "effect": "effect", "speed": "speed", "switch": "on"})
+        changes = {key: getattr(args, opt) for opt, key in names.items()
+                   if getattr(args, opt, None) is not None}
+        if not changes:
+            raise AmError("nothing to set -- give at least one of "
+                          + ", ".join("--on/--off" if o == "switch" else f"--{o}"
+                                      for o in names))
+        m.write(section, changes)
+        shown = ", ".join(
+            on_off(v) if k == "on" else
+            f"{k.replace('colour', 'colour ').replace('_', ' ').strip()} "
+            f"{hex_arg(v) if 'colour' in k else v}"
+            for k, v in changes.items())
+        say(f"{what} light -> {shown}")
     elif a in ("color", "colour"):
         key = "colour_charged" if getattr(args, "charged", False) else "colour"
         done = m.write(section, {key: args.hex})

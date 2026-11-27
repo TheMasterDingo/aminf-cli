@@ -21,7 +21,8 @@ KNOWN_KEYS = {
               "hw_debounce_press", "hw_debounce_release"},
     "dpi": {"stages", "count", "active", "button"},
     "light": {"on", "effect", "speed", "colour", "colour_charged"},
-    "dongle_light": {"on", "effect", "colour", "speed", "brightness", "hue1",
+    "dongle_light": {"on", "effect", "colour", "colour2", "colour3", "speed",
+                     "brightness", "hue1",
                      "sat1", "hue2", "sat2", "hue3", "sat3", "preset"},
 }
 

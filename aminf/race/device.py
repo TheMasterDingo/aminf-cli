@@ -813,8 +813,8 @@ class RaceMouse(Mouse):
     def _write_dongle_light(self, changes, strict=True):
         if not self.has_dongle:
             raise AmError("dongle lighting needs the 2.4G dongle connected")
-        allowed = ("on", "effect", "colour", "speed", "brightness",
-                   "hue1", "sat1", "hue2", "sat2", "hue3", "sat3")
+        allowed = ("on", "effect", "colour", "colour2", "colour3", "speed",
+                   "brightness", "hue1", "sat1", "hue2", "sat2", "hue3", "sat3")
         self._check_keys("dongle_light", changes, allowed)
         raw = dict(changes)
         if "on" in raw:
@@ -824,8 +824,10 @@ class RaceMouse(Mouse):
                 raise AmError(f"dongle light effect must be one of "
                               f"{', '.join(DONGLE_EFFECTS)}")
             raw["effect"] = DONGLE_EFFECTS[raw["effect"]]
-        if "colour" in raw:
-            raw["hue1"], raw["sat1"] = hex_to_hue_sat(raw.pop("colour"))
+        # The dongle stores each of its three colours as hue and saturation.
+        for n, key in ((1, "colour"), (2, "colour2"), (3, "colour3")):
+            if key in raw:
+                raw[f"hue{n}"], raw[f"sat{n}"] = hex_to_hue_sat(raw.pop(key))
         limits = {"effect": (0, 255), "speed": (1, 20) if strict else (-80, 175),
                   "brightness": (1, 255) if strict else (0, 255)}
         for key, value in raw.items():

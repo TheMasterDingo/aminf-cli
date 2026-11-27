@@ -23,4 +23,4 @@ def test_no_device_exits_1(capsys):
 
 
 def test_version():
-    assert aminf.__version__ == "3.0.0"
+    assert aminf.__version__ == "3.1.0"

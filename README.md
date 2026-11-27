@@ -117,10 +117,13 @@ aminf light color '#FF4C00'
 aminf light brightness 120        # .97/.100R2: 1-255   .100: 0-4
 aminf light speed 12
 aminf light effect breathing
+aminf light set --color '#FF7940' --brightness 120 --speed 12 --on   # several at once
+aminf light set --color2 '#B100FF' --color3 '#00FF00'   # .97/.100R2: 2nd and 3rd colour
 
 aminf mouse-light off | on | toggle
 aminf mouse-light status
 aminf mouse-light color '#FF823C' # .100: add --charged for the "charged" colour
+aminf mouse-light set --color '#FF823C' --off   # several at once
 
 aminf all off                     # dongle + mouse in one go
 
@@ -395,6 +398,11 @@ against simulated mice seeded with those captures.
   The bundle itself is Angry Miao's code and is not in this repository.
 
 ## Changes
+
+**3.1.0** — `aminf light set` and `aminf mouse-light set` change several
+light settings in one command and one write (`--color --brightness --speed
+--effect --on/--off`). On the .97 and .100R2 the dongle's second and third
+colours can be set with `--color2` and `--color3`.
 
 **3.0.0** — AM Infinity .100R2 support. On all three mice: DPI (it is back,
 per profile and verified), remapping of every button, sleep times, debounce,
