@@ -12,10 +12,9 @@ import json
 import re
 import sys
 
-from aminf import __version__, legacy100_cli, profile
+from aminf import __version__, profile
 from aminf.actions import BUTTON_NAMES, format_action
 from aminf.colour import hue_to_hex
-from aminf.device import Mouse
 from aminf.discover import open_mice
 from aminf.errors import AmError, MouseOffline, Unsupported
 from aminf.models import MODELS
@@ -84,8 +83,9 @@ def print_status(s):
     rate = s["polling_rate"]
     print(f"polling rate   {f'{rate} Hz' if rate else '--'}")
 
-    if s["model"] == ".100":
-        legacy100_cli.print_status_tail(s)
+    if "lod" not in s:
+        print_status_100(s)
+        print_full(s)
         return
 
     if s.get("mouse_offline"):
@@ -107,6 +107,25 @@ def print_status(s):
               f"{hue_to_hex(dl['hue1'])} sat={dl['sat1']} "
               f"bright={dl['brightness']} speed={dl['speed']}")
     print_full(s)
+
+
+def print_status_100(s):
+    """The .100's lines, as 2.2.0 printed them."""
+    if s.get("mouse_offline"):
+        print("mouse          off or out of range (dongle values only)")
+    ml = s["mouse_light"]
+    if ml:
+        extra = (f" / charged {ml['colour_charged']}"
+                 if "colour_charged" in ml else "")
+        print(f"mouse light    {on_off(ml['on'])}  {ml['colour']}{extra}")
+    dl = s["dongle_light"]
+    if dl:
+        line = f"dongle light   {on_off(dl['on'])}"
+        if "colour" in dl:
+            line += (f"  {dl['effect_name']}  {dl['colour']}"
+                     f"{' (preset)' if dl['preset'] else ''}"
+                     f"  bright={dl['brightness']}/4")
+        print(line)
 
 
 def print_full(s):
@@ -203,6 +222,8 @@ def build_parser():
     for name in ("on", "off", "toggle", "status"):
         ms.add_parser(name)
     q = ms.add_parser("color", aliases=["colour"]); q.add_argument("hex")
+    q.add_argument("--charged", action="store_true",
+                   help="the colour shown once charged (.100)")
 
     p = sub.add_parser("all", help="dongle and mouse lighting together")
     p.add_argument("action", choices=["on", "off", "toggle"])
@@ -310,7 +331,8 @@ def cmd_light(m, args, say):
         m.write(section, {"on": on})
         say(f"{what} light -> {on_off(on)}")
     elif a in ("color", "colour"):
-        done = m.write(section, {"colour": args.hex})
+        key = "colour_charged" if getattr(args, "charged", False) else "colour"
+        done = m.write(section, {key: args.hex})
         extra = (f" (hue {done['hue1']}, sat {done['sat1']})"
                  if "hue1" in done else "")
         say(f"{what} colour -> {hex_arg(args.hex)}{extra}")
@@ -487,8 +509,6 @@ def to_int(text, what):
 
 def run_command(m, args, say):
     """Run one command on one mouse. Returns data for --json status."""
-    if not isinstance(m, Mouse):            # the .100 until its new driver
-        return legacy100_cli.run_command(m, args, say, print_status)
     c = args.cmd
     if c == "status":
         s = collect_status(m, args.full)

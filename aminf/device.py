@@ -3,9 +3,33 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from aminf.errors import AmError, Unsupported
+
 # Every model groups its settings into the same sections, so the command
 # line, export/import and the hardware test tool are written once.
 SECTIONS = ("sensor", "power", "dpi", "buttons", "light", "dongle_light")
+
+
+# Every key some model has in each section. A key from this table that the
+# connected model lacks is "not on this mouse" (a notice); anything else is a
+# typo (an error).
+KNOWN_KEYS = {
+    "sensor": {"polling_rate", "lod", "motion_sync", "angle_snap", "ripple",
+               "fps_mode", "angle", "angle_enabled", "profile_key"},
+    "power": {"sleep_24g", "sleep_bt", "deep_sleep_24g", "deep_sleep_bt",
+              "debounce_wired", "debounce_24g", "debounce_bt",
+              "hw_debounce_press", "hw_debounce_release"},
+    "dpi": {"stages", "count", "active", "button"},
+    "light": {"on", "effect", "speed", "colour", "colour_charged"},
+    "dongle_light": {"on", "effect", "colour", "speed", "brightness", "hue1",
+                     "sat1", "hue2", "sat2", "hue3", "sat3", "preset"},
+}
+
+
+def reject_key(section, key, model):
+    if key in KNOWN_KEYS.get(section, ()):
+        raise Unsupported(f"the {model.name} has no '{key}' setting")
+    raise AmError(f"{section}: unknown setting '{key}'")
 
 
 class Mouse(ABC):

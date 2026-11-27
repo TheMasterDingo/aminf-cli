@@ -11,7 +11,7 @@ import time
 from aminf.actions import (BUTTON_NAMES, check_left_click, format_action,
                            parse_action)
 from aminf.colour import hex_to_hue_sat, hex_to_rgb, hue_to_hex, rgb_to_hex
-from aminf.device import Mouse
+from aminf.device import Mouse, reject_key
 from aminf.errors import (AmError, DeviceBusy, DeviceNotFound, MouseOffline,
                           NotConfirmed, NotInFirmware, Refused, Unsupported)
 from aminf.models import DPI_MIN, DPI_STEP
@@ -324,11 +324,10 @@ class RaceMouse(Mouse):
             return self._write_dongle_light(dict(changes), strict)
         raise AmError(f"unknown section '{section}'")
 
-    @staticmethod
-    def _check_keys(section, changes, allowed):
+    def _check_keys(self, section, changes, allowed):
         for key in changes:
             if key not in allowed:
-                raise AmError(f"{section}: unknown setting '{key}'")
+                reject_key(section, key, self.model)
 
     # sensor ...............................................................
 

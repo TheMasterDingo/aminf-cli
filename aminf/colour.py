@@ -1,5 +1,11 @@
 """Colour conversions shared by every model."""
 
+from aminf.errors import AmError
+
+
+class NotAColour(AmError, ValueError):
+    """Not a #RRGGBB colour. Also a ValueError, as it was in 2.2.0."""
+
 HUE_MAX = 1530
 
 
@@ -8,7 +14,7 @@ def hex_to_rgb(text):
     if len(t) == 3:
         t = "".join(c * 2 for c in t)
     if len(t) != 6 or any(c not in "0123456789abcdefABCDEF" for c in t):
-        raise ValueError(f"not a hex colour: {text}")
+        raise NotAColour(f"not a hex colour: {text} (use #RRGGBB)")
     return int(t[0:2], 16), int(t[2:4], 16), int(t[4:6], 16)
 
 

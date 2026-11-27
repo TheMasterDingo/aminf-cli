@@ -104,3 +104,19 @@ def test_hwtest_leaves_a_stage_alone_if_the_mouse_rejects_its_own_value(r2fake, 
     assert by_name["dpi stage 7"]["result"] == "verified"        # the value write is still covered
     assert report["restored"] is True
     assert r2fake.replies["12485:"][17:19] == (30000).to_bytes(2, "little")     # still 30000
+
+
+def test_hwtest_on_the_100(tmp_path):
+    from tests.conftest import load
+    from tests.fake_m100 import FakeM100
+    fake = FakeM100(load("100-dongle"))
+    assert hwtest.run("100", backend=fake, out_dir=tmp_path, yes=True) == 0
+    report = json.loads((tmp_path / "100-dongle.json").read_text())
+    by_name = {c["check"]: c["result"] for c in report["checks"]}
+    assert report["restored"] is True
+    assert by_name["dpi stage 8"] == "unsupported" and by_name["dpi stage 7"] == "verified"
+    assert {"profile switch", "polling_rate", "lod", "fps_mode", "angle", "sleep_bt", "deep_sleep_bt",
+            "debounce_wired", "dpi count", "dpi use", "dpi button", "remap forward", "remap wheel-down",
+            "light on/off", "light colour", "dongle light on/off", "dongle light colour",
+            "dongle light brightness", "dongle light effect", "dongle light speed"} <= set(by_name)
+    assert set(by_name.values()) <= {"verified", "unsupported"}

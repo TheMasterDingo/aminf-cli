@@ -125,6 +125,17 @@ def vectors(model, s):
                     {"speed": 6 if dl["speed"] == 5 else 5}))
         out.append(("dongle light effect", "dongle_light",
                     {"effect": "solid" if dl["effect"] == "breathing" else "breathing"}))
+    elif "preset" in dl:                   # the .100's dongle
+        out.append(("dongle light colour", "dongle_light",
+                    {"colour": "#0000FF" if dl["colour"].upper() == "#00FF00"
+                     else "#00FF00"}))
+        out.append(("dongle light brightness", "dongle_light",
+                    {"brightness": 3 if dl["brightness"] == 2 else 2}))
+        out.append(("dongle light effect", "dongle_light",
+                    {"effect": "neon" if dl["effect"] == "breathing"
+                     else "breathing"}))
+        out.append(("dongle light speed", "dongle_light",
+                    {"speed": 2 if dl["speed"] == 3 else 3}))
     skip = NOT_CHECKED.get(model.key, {})
     return [v for v in out if v[0] not in skip]
 

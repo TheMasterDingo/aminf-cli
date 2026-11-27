@@ -72,14 +72,11 @@ def find(backend, model, prefer):
 
 
 def capture_m100(prefer, out_dir):
-    """The .100: the reads its configurator pages send. Uses the 2.2.0 link
-    code for the report-id probe and the dongle's relay handshake."""
-    from aminf import legacy100
+    """The .100: the reads its configurator pages send."""
     from aminf.m100 import codec as m100
+    from aminf.m100.device import M100Mouse
 
-    # reads the configurator sends that 2.2.0 never needed
-    legacy100.M100_ALLOWED |= {m100.GET_DPI} | {r for r, _ in m100.TOGGLES.values()}
-    dev = legacy100.Am100.open(HidapiBackend(), prefer=prefer)
+    dev = M100Mouse.open(HidapiBackend(), MODELS["100"], prefer=prefer)
     replies, answered = {}, 0
 
     def save(key, fetch):
@@ -98,19 +95,19 @@ def capture_m100(prefer, out_dir):
     try:
         if dev.dongle:
             save(f"local/{m100.DONGLE_STATUS}:",
-                 lambda: dev.dongle.send(list(m100.raw(m100.DONGLE_STATUS)), expect=True))
+                 lambda: dev.dongle.send(m100.raw(m100.DONGLE_STATUS), expect=True))
             for code in (m100.GET_DONGLE_SWITCH, m100.GET_DONGLE_LIGHT):
                 save(f"local/{code}:",
-                     lambda code=code: dev.dongle.send(list(m100.cmd(code)), expect=True))
+                     lambda code=code: dev.dongle.send(m100.cmd(code), expect=True))
         prof = save(f"{m100.GET_PROFILE}:",
-                    lambda: dev._to_mouse(list(m100.cmd(m100.GET_PROFILE)), expect=True))
+                    lambda: dev._to_mouse(m100.cmd(m100.GET_PROFILE), expect=True))
         profile = prof[1] if prof and prof[0] == m100.GET_PROFILE and prof[1] < 8 else 0
         for code, params in ((m100.GET_BATTERY, ()), (m100.GET_PARAMS, ()),
                              (m100.GET_DPI, (profile,)), (m100.GET_KEYMAP, (profile, 0)),
                              (226, ()), (227, ()), (228, ()), (229, ())):
             save(f"{code}:{bytes(params).hex()}",
                  lambda code=code, params=params: dev._to_mouse(
-                     list(m100.cmd(code, params)), expect=True))
+                     m100.cmd(code, params), expect=True))
         connection = "dongle" if dev.dongle else "usb"
     finally:
         dev.close()
