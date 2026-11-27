@@ -279,3 +279,27 @@ def test_export_import_roundtrip(m100, run, tmp_path):
     run(["remap", "back", "f23"], m100[1])
     code, out, _ = run(["import", path], m100[1])
     assert code == 0 and m100[0].read("sensor")["lod"] == 0 and m100[0].read("buttons")["back"] == "back"
+
+
+# Seen on the owner's .100 while it was in use: one parameter-block write was
+# silently dropped (the same write worked every time it was repeated).
+
+def test_a_dropped_block_write_is_sent_once_more(m100):
+    m100[1].drop_first = {83}
+    assert m100[0].write("power", {"sleep_24g": 210}) == {"sleep_24g": 210}
+    assert m100[1].sent_cmds().count(83) == 2
+    assert m100[0].read("power")["sleep_24g"] == 210
+
+
+def test_a_block_write_is_not_retried_forever(m100):
+    m100[1].drop_writes = {83}
+    with pytest.raises(NotConfirmed):
+        m100[0].write("power", {"sleep_24g": 210})
+    assert m100[1].sent_cmds().count(83) == 2
+
+
+def test_dropped_dpi_and_toggle_writes_are_retried_too(m100):
+    m100[1].drop_first = {84, 101}
+    assert m100[0].write("dpi", {"stages": {6: {"x": 1000}}})
+    assert m100[0].write("sensor", {"angle": 5}) == {"angle": 5}
+    assert m100[1].sent_cmds().count(84) == 2 and m100[1].sent_cmds().count(101) == 2

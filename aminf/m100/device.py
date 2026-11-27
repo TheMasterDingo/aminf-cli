@@ -331,6 +331,19 @@ class M100Mouse(Mouse):
                 return got
         raise NotConfirmed(name, wanted, got)
 
+    def _write_confirmed(self, name, send, wanted, read):
+        """Send a write and read it back; if the mouse did not take it, send
+        it once more. A busy .100 now and then drops a write that it accepts
+        when repeated -- seen on real hardware, and the reason the
+        configurator repeats its own key-map writes."""
+        for attempt in (1, 2):
+            send()
+            try:
+                return self._confirm(name, wanted, read)
+            except NotConfirmed:
+                if attempt == 2:
+                    raise
+
     # -- blocks: read whole, change bytes, write whole -----------------------
 
     def _block(self, read_cmd, params, what):
@@ -354,14 +367,16 @@ class M100Mouse(Mouse):
             print(f"  would read the parameter block from the mouse and "
                   f"write it back with {what}")
             return
-        block = self._params()
-        self._to_mouse(codec.patch_block(block, codec.SET_PARAMS, offsets),
-                       expect=False)
+        def send():
+            block = self._params()            # fresh each time: never stale
+            self._to_mouse(codec.patch_block(block, codec.SET_PARAMS, offsets),
+                           expect=False)
 
         def state():
             now = self._params()
             return {o: now[o] for o in offsets}
-        self._confirm(label, {o: v & 0xFF for o, v in offsets.items()}, state)
+        self._write_confirmed(label, send,
+                              {o: v & 0xFF for o, v in offsets.items()}, state)
 
     def _toggle_get(self, name):
         read, _ = codec.TOGGLES[name]
@@ -373,8 +388,9 @@ class M100Mouse(Mouse):
     def _toggle_set(self, name, value):
         _, write = codec.TOGGLES[name]
         byte = value & 0xFF if name == "angle" else (1 if value else 0)
-        self._to_mouse(codec.cmd(write, [byte]), expect=False)
-        return self._confirm(name, value, lambda: self._toggle_get(name))
+        return self._write_confirmed(
+            name, lambda: self._to_mouse(codec.cmd(write, [byte]), expect=False),
+            value, lambda: self._toggle_get(name))
 
     # -- basics --------------------------------------------------------------
 
@@ -601,13 +617,17 @@ class M100Mouse(Mouse):
                         block_changes["active"] = active
                     _int_in("active DPI stage", active, 0, count - 1)
                 offsets = codec.dpi_changes(block_changes, cur)
-                self._to_mouse(codec.dpi_patch(block, offsets), expect=False)
+
+                def send():
+                    self._to_mouse(codec.dpi_patch(self._dpi_block(profile),
+                                                   offsets), expect=False)
 
                 def state():
                     now = self._dpi_block(profile)
                     return {o: now[o] for o in offsets}
-                self._confirm("DPI", {o: v & 0xFF for o, v in offsets.items()},
-                              state)
+                self._write_confirmed(
+                    "DPI", send, {o: v & 0xFF for o, v in offsets.items()},
+                    state)
                 if block_changes.get("active") is not None and \
                         "active" not in changes and active != cur["active"]:
                     done["active"] = active
