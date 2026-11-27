@@ -319,20 +319,18 @@ by read-back, restores the profile and compares. The raw results are in
 
 | | .97 dongle | .97 cable | .100R2 dongle | .100R2 cable | .100 dongle | .100 cable |
 |---|---|---|---|---|---|---|
-| profile switch | ✓ | ✓ | ✓ | ✓ | ✓ | not run |
-| polling rate, lift-off, sensor toggles, angle | ✓ | ✓ | ✓ | ✓ | ✓ | not run |
-| sleep times, debounce | ✓ | ✓ | ✓ | ✓ | ✓ | not run |
-| DPI value, stage count, active stage, button, colour | ✓ | ✓ | ✓ | ✓ | ✓ | not run |
-| button remap (key and media key) | ✓ | ✓ | ✓ | ✓ | ✓ | not run |
-| mouse light on / off | ✓ | ✓ | ✓ | ✓ | ✓ | not run |
-| mouse light colour | ✓ | ✓ | not run | not run | ✓ | not run |
+| profile switch | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| polling rate, lift-off, sensor toggles, angle | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| sleep times, debounce | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| DPI value, stage count, active stage, button, colour | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| button remap (key and media key) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| mouse light on / off | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| mouse light colour | ✓ | ✓ | not run | not run | ✓ | ✓ |
 | dongle light on / off, colour, brightness, speed, effect | ✓ | n/a | ✓ | n/a | ✓ | n/a |
-| export, then import to restore | ✓ | ✓ | ✓ | ✓ | ✓ | not run |
+| export, then import to restore | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 Not run, and why:
 
-* **.100 on its cable** — not tested yet. The code path is the same as over
-  the dongle minus the relay.
 * **.100R2 mouse light colour** — `aminf` writes the solid colour the way
   the .97 does. That has not been compared with what the .100R2's own
   configurator page sends, so it is left out of the hardware run.
