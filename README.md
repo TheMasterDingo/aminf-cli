@@ -196,7 +196,7 @@ applied; the exit code is `2`.
 | status, battery, profile | ✓ | ✓ | ✓ |
 | dongle light on / off / colour / brightness / speed / effect | ✓ | ✓ | ✓ |
 | mouse light on / off | ✓ | ✓ | ✓ (its charge light) |
-| mouse light colour | ✓ | ✓ unverified | ✓ charging and charged colours |
+| mouse light colour | ✓ | ✓ | ✓ charging and charged colours |
 | polling rate | ✓ | ✓ | ✓ |
 | DPI stages, stage count, active stage, DPI button, stage colours | ✓ | ✓ | ✓ |
 | every button → key, media key, mouse function, DPI action, disabled | ✓ | ✓ | ✓ |
@@ -325,15 +325,16 @@ by read-back, restores the profile and compares. The raw results are in
 | DPI value, stage count, active stage, button, colour | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | button remap (key and media key) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | mouse light on / off | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| mouse light colour | ✓ | ✓ | not run | not run | ✓ | ✓ |
+| mouse light colour | ✓ | ✓ | not run | ✓ | ✓ | ✓ |
 | dongle light on / off, colour, brightness, speed, effect | ✓ | n/a | ✓ | n/a | ✓ | n/a |
 | export, then import to restore | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 Not run, and why:
 
-* **.100R2 mouse light colour** — `aminf` writes the solid colour the way
-  the .97 does. That has not been compared with what the .100R2's own
-  configurator page sends, so it is left out of the hardware run.
+* **.100R2 mouse light colour over the dongle** — verified on the cable
+  only: the record the configurator itself had written on the mouse is byte
+  for byte what `aminf` writes, and a colour written by `aminf` read back
+  correctly. Over the dongle it takes the same path as the .97's.
 * Remap actions other than a key and a media key (mouse functions, DPI
   actions, `disabled`, `profile-switch`), and modifiers, are encoded as the
   bundle encodes them and checked by unit tests, not on hardware.
